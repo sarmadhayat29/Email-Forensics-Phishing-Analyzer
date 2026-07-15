@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Email Forensics Report — Urgent: Your account has been limited</title>
+<style>
+  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 2rem; color: #222; background: #fafafa; }
+  h1 { font-size: 1.4rem; }
+  .verdict { display: inline-block; padding: 0.4rem 1rem; border-radius: 6px; color: white;
+              background: #c62828; font-weight: bold; font-size: 1.1rem; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0 2rem; background: white; }
+  th, td { border: 1px solid #ddd; padding: 0.5rem 0.7rem; text-align: left; font-size: 0.9rem; }
+  th { background: #eef3ef; }
+  .meta td:first-child { font-weight: bold; width: 160px; background: #f5f5f5; }
+  section { margin-bottom: 2rem; }
+  code { font-size: 0.85em; }
+</style>
+</head>
+<body>
+  <h1>Email Forensics &amp; Phishing Analyzer — Verdict Report</h1>
+  <p><span class="verdict">High risk — score 175</span></p>
+
+  <section>
+    <h2>Message Metadata</h2>
+    <table class="meta">
+      <tr><td>File</td><td>phishing_sample_1.eml</td></tr>
+      <tr><td>Subject</td><td>Urgent: Your account has been limited</td></tr>
+      <tr><td>From</td><td>"PayPal Security" &lt;no-reply@paypa1-secure.com&gt;</td></tr>
+      <tr><td>Date</td><td>Wed, 15 Jul 2026 09:40:00 +0000</td></tr>
+      <tr><td>Message-ID</td><td>&lt;20260715094012.ABC123@paypa1-secure.com&gt;</td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Authentication Results (SPF / DKIM / DMARC)</h2>
+    <table>
+      <tr><th>SPF</th><th>DKIM</th><th>DMARC</th><th>Source</th></tr>
+      <tr>
+        <td>fail</td>
+        <td>fail</td>
+        <td>fail</td>
+        <td>Authentication-Results header</td>
+      </tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Routing Analysis (Received chain)</h2>
+    <p><strong>Hop count:</strong> 2</p>
+    <table>
+      <tr><th>From host</th><th>By host</th><th>IP</th><th>Timestamp</th></tr>
+      <tr><td>unknown-relay.ru</td><td>mx.example.com</td><td>185.220.101.7</td><td>2026-07-15T09:41:12+00:00</td></tr><tr><td>mail.paypa1-secure.com</td><td>unknown-relay.ru</td><td>203.0.113.44</td><td>2026-07-15T09:40:02+00:00</td></tr>
+    </table>
+    <p><strong>Flags:</strong></p>
+    <ul><li><em>None</em></li></ul>
+  </section>
+
+  <section>
+    <h2>Attachments</h2>
+    <table>
+      <tr><th>Filename</th><th>Declared ext.</th><th>True type</th><th>Size</th><th>SHA-256</th></tr>
+      <tr><td>Account_Statement.pdf.exe</td><td>.exe</td><td>exe</td><td>113 B</td><td><code>234aeb2ff6536c95...</code></td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>Triggered Phishing Indicators</h2>
+    <table>
+      <tr><th>Signal</th><th>Weight</th><th>Detail</th></tr>
+      <tr><td>spf_fail</td><td>30</td><td>SPF check failed for sender domain 'paypa1-secure.com'.</td></tr><tr><td>dkim_fail</td><td>30</td><td>DKIM signature failed verification.</td></tr><tr><td>dmarc_fail</td><td>25</td><td>DMARC alignment failed — message does not meet the domain's stated policy.</td></tr><tr><td>lookalike_domain</td><td>25</td><td>Sender domain 'paypa1-secure.com' closely resembles the known brand domain 'paypal.com'.</td></tr><tr><td>display_name_mismatch</td><td>15</td><td>Display name ('PayPal Security') references 'paypal', but the actual sending address is 'no-reply@paypa1-secure.com' — mismatch suggests impersonation.</td></tr><tr><td>reply_to_mismatch</td><td>10</td><td>Reply-To ('security-support@totally-not-paypal.info') differs from From ('no-reply@paypa1-secure.com') — replies would be silently redirected.</td></tr><tr><td>risky_link</td><td>15</td><td>Link 'Click here to verify your account' -&gt; http://185.220.101.7/verify-account/login.php: link target is a raw IP address (185.220.101.7).</td></tr><tr><td>risky_attachment</td><td>25</td><td>Attachment 'Account_Statement.pdf.exe': declared extension '.exe' is executable/script type; filename uses a double extension (e.g. invoice.pdf.exe).</td></tr>
+    </table>
+  </section>
+
+</body>
+</html>

@@ -1,0 +1,8 @@
+# All optional. The tool runs on the standard library alone and degrades
+# gracefully (with a note in the report) if these are not installed.
+
+dnspython>=2.6.0      # live DNS lookups for SPF/DKIM/DMARC re-verification
+dkimpy>=1.1.0          # DKIM signature verification
+checkdmarc>=5.4.0      # DMARC policy evaluation
+python-whois>=0.9.4    # domain-age lookup for newly-registered-domain signal
+extract-msg>=0.45.0    # Outlook .msg file parsing

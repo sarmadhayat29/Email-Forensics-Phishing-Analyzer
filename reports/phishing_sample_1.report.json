@@ -1,0 +1,91 @@
+{
+  "file": "phishing_sample_1.eml",
+  "subject": "Urgent: Your account has been limited",
+  "from": "\"PayPal Security\" <no-reply@paypa1-secure.com>",
+  "date": "Wed, 15 Jul 2026 09:40:00 +0000",
+  "message_id": "<20260715094012.ABC123@paypa1-secure.com>",
+  "authentication": {
+    "raw": "mx.example.com; spf=fail smtp.mailfrom=paypa1-secure.com;\n dkim=fail header.d=paypa1-secure.com; dmarc=fail header.from=paypa1-secure.com",
+    "source": "Authentication-Results header",
+    "spf": "fail",
+    "dkim": "fail",
+    "dmarc": "fail"
+  },
+  "routing": {
+    "hops": [
+      {
+        "raw": "from unknown-relay.ru ([185.220.101.7])\n\tby mx.example.com with SMTP id abc123\n\tfor <victim@example.com>; Wed, 15 Jul 2026 09:41:12 +0000",
+        "from_host": "unknown-relay.ru",
+        "by_host": "mx.example.com",
+        "ip": "185.220.101.7",
+        "timestamp": "2026-07-15T09:41:12+00:00"
+      },
+      {
+        "raw": "from mail.paypa1-secure.com ([203.0.113.44])\n\tby unknown-relay.ru with ESMTP id def456\n\tfor <victim@example.com>; Wed, 15 Jul 2026 09:40:02 +0000",
+        "from_host": "mail.paypa1-secure.com",
+        "by_host": "unknown-relay.ru",
+        "ip": "203.0.113.44",
+        "timestamp": "2026-07-15T09:40:02+00:00"
+      }
+    ],
+    "hop_count": 2,
+    "flags": []
+  },
+  "attachments": [
+    {
+      "filename": "Account_Statement.pdf.exe",
+      "declared_extension": "exe",
+      "true_type": "exe",
+      "size_bytes": 113,
+      "hashes": {
+        "md5": "553cadd2acb20724217cab0b3511fbef",
+        "sha1": "d3c03cb4182215d441125090ada0ccbe978cab08",
+        "sha256": "234aeb2ff6536c952186fa3b8ce83a24d2ca6a1c0d3165f7b6a78312d89d768f"
+      }
+    }
+  ],
+  "score": 175,
+  "risk_level": "High",
+  "signals": [
+    {
+      "signal": "spf_fail",
+      "weight": 30,
+      "detail": "SPF check failed for sender domain 'paypa1-secure.com'."
+    },
+    {
+      "signal": "dkim_fail",
+      "weight": 30,
+      "detail": "DKIM signature failed verification."
+    },
+    {
+      "signal": "dmarc_fail",
+      "weight": 25,
+      "detail": "DMARC alignment failed \u2014 message does not meet the domain's stated policy."
+    },
+    {
+      "signal": "lookalike_domain",
+      "weight": 25,
+      "detail": "Sender domain 'paypa1-secure.com' closely resembles the known brand domain 'paypal.com'."
+    },
+    {
+      "signal": "display_name_mismatch",
+      "weight": 15,
+      "detail": "Display name ('PayPal Security') references 'paypal', but the actual sending address is 'no-reply@paypa1-secure.com' \u2014 mismatch suggests impersonation."
+    },
+    {
+      "signal": "reply_to_mismatch",
+      "weight": 10,
+      "detail": "Reply-To ('security-support@totally-not-paypal.info') differs from From ('no-reply@paypa1-secure.com') \u2014 replies would be silently redirected."
+    },
+    {
+      "signal": "risky_link",
+      "weight": 15,
+      "detail": "Link 'Click here to verify your account' -> http://185.220.101.7/verify-account/login.php: link target is a raw IP address (185.220.101.7)."
+    },
+    {
+      "signal": "risky_attachment",
+      "weight": 25,
+      "detail": "Attachment 'Account_Statement.pdf.exe': declared extension '.exe' is executable/script type; filename uses a double extension (e.g. invoice.pdf.exe)."
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "file": "legit_sample_1.eml",
+  "subject": "Reminder: Final-Year Project Submission Deadline",
+  "from": "\"GIKI Academics Office\" <academics@giki.edu.pk>",
+  "date": "Wed, 15 Jul 2026 08:14:50 +0000",
+  "message_id": "<20260715081455.XYZ789@giki.edu.pk>",
+  "authentication": {
+    "raw": "mx.example.com; spf=pass smtp.mailfrom=giki.edu.pk;\n dkim=pass header.d=giki.edu.pk; dmarc=pass header.from=giki.edu.pk",
+    "source": "Authentication-Results header",
+    "spf": "pass",
+    "dkim": "pass",
+    "dmarc": "pass"
+  },
+  "routing": {
+    "hops": [
+      {
+        "raw": "from mx-out.giki.edu.pk ([103.255.4.10])\n\tby mx.example.com with ESMTPS id ghi789\n\tfor <sofia@example.com>; Wed, 15 Jul 2026 08:15:40 +0000",
+        "from_host": "mx-out.giki.edu.pk",
+        "by_host": "mx.example.com",
+        "ip": "103.255.4.10",
+        "timestamp": "2026-07-15T08:15:40+00:00"
+      },
+      {
+        "raw": "from mail.giki.edu.pk ([103.255.4.2])\n\tby mx-out.giki.edu.pk with ESMTP id jkl012\n\tfor <sofia@example.com>; Wed, 15 Jul 2026 08:14:55 +0000",
+        "from_host": "mail.giki.edu.pk",
+        "by_host": "mx-out.giki.edu.pk",
+        "ip": "103.255.4.2",
+        "timestamp": "2026-07-15T08:14:55+00:00"
+      }
+    ],
+    "hop_count": 2,
+    "flags": []
+  },
+  "attachments": [],
+  "score": 0,
+  "risk_level": "Low",
+  "signals": []
+}
