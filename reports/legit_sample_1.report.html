@@ -1,75 +1,262 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Email Forensics Report — Reminder: Final-Year Project Submission Deadline</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SOC Email Investigation Report — Reminder: Final-Year Project Submission Deadline</title>
 <style>
-  body { font-family: -apple-system, Segoe UI, Arial, sans-serif; margin: 2rem; color: #222; background: #fafafa; }
-  h1 { font-size: 1.4rem; }
-  .verdict { display: inline-block; padding: 0.4rem 1rem; border-radius: 6px; color: white;
-              background: #2e7d32; font-weight: bold; font-size: 1.1rem; }
-  table { border-collapse: collapse; width: 100%; margin: 1rem 0 2rem; background: white; }
-  th, td { border: 1px solid #ddd; padding: 0.5rem 0.7rem; text-align: left; font-size: 0.9rem; }
-  th { background: #eef3ef; }
-  .meta td:first-child { font-weight: bold; width: 160px; background: #f5f5f5; }
-  section { margin-bottom: 2rem; }
-  code { font-size: 0.85em; }
+  :root {
+    --bg-main: #0f172a;
+    --card-bg: #1e293b;
+    --card-border: #334155;
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+    --accent: #38bdf8;
+  }
+  body {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    margin: 0;
+    padding: 2rem;
+    line-height: 1.5;
+  }
+  .container { max-width: 1200px; margin: 0 auto; }
+  
+  /* Header Card */
+  .verdict-header {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    margin-bottom: 2rem;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+  }
+  .verdict-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+    border-bottom: 1px solid var(--card-border);
+    padding-bottom: 1rem;
+    margin-bottom: 1rem;
+  }
+  h1 { font-size: 1.5rem; margin: 0; font-weight: 700; color: var(--accent); }
+  
+  /* Badges */
+  .badge {
+    display: inline-block;
+    padding: 0.3rem 0.8rem;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+  .score-box {
+    background: #0f172a;
+    border: 1px solid var(--card-border);
+    padding: 0.5rem 1.2rem;
+    border-radius: 8px;
+    font-size: 1.1rem;
+    font-weight: bold;
+  }
+
+  /* Executive Summary Cards Grid */
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+  .info-card { background: #0f172a; border: 1px solid var(--card-border); border-radius: 8px; padding: 1rem; }
+  .info-card strong { color: var(--accent); font-size: 0.85rem; text-transform: uppercase; display: block; margin-bottom: 0.3rem; }
+
+  /* Collapsible Sections */
+  details {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: 10px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  summary {
+    padding: 1rem 1.5rem;
+    font-weight: 700;
+    font-size: 1.05rem;
+    cursor: pointer;
+    background: #1e293b;
+    user-select: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--text-main);
+  }
+  summary:hover { background: #334155; }
+  summary::after { content: "▼"; font-size: 0.8rem; color: var(--text-muted); }
+  details[open] summary::after { content: "▲"; }
+  .section-content { padding: 1.5rem; border-top: 1px solid var(--card-border); }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; background: #0f172a; border-radius: 6px; overflow: hidden; }
+  th, td { padding: 0.75rem 1rem; text-align: left; border-bottom: 1px solid var(--card-border); font-size: 0.9rem; }
+  th { background: #1e293b; color: var(--accent); font-weight: 600; text-transform: uppercase; font-size: 0.8rem; letter-spacing: 0.05em; }
+  tr:last-child td { border-bottom: none; }
+  code { font-family: monospace; background: #090d16; padding: 0.2rem 0.4rem; border-radius: 4px; color: #38bdf8; font-size: 0.85em; }
+
+  /* Recommendation List */
+  .rec-box { background: #090d16; border-left: 4px solid var(--accent); padding: 1rem; border-radius: 4px; margin-top: 0.5rem; }
+  .rec-box li { margin-bottom: 0.5rem; }
 </style>
 </head>
 <body>
-  <h1>Email Forensics &amp; Phishing Analyzer — Verdict Report</h1>
-  <p><span class="verdict">Low risk — score 0</span></p>
+<div class="container">
 
-  <section>
-    <h2>Message Metadata</h2>
-    <table class="meta">
-      <tr><td>File</td><td>legit_sample_1.eml</td></tr>
-      <tr><td>Subject</td><td>Reminder: Final-Year Project Submission Deadline</td></tr>
-      <tr><td>From</td><td>"GIKI Academics Office" &lt;academics@giki.edu.pk&gt;</td></tr>
-      <tr><td>Date</td><td>Wed, 15 Jul 2026 08:14:50 +0000</td></tr>
-      <tr><td>Message-ID</td><td>&lt;20260715081455.XYZ789@giki.edu.pk&gt;</td></tr>
+  <!-- Overall Verdict & Executive Banner -->
+  <div class="verdict-header">
+    <div class="verdict-banner">
+      <div>
+        <h1>SOC Email Investigation Verdict Report</h1>
+        <small style="color: var(--text-muted);">Target File: <code>legit_sample_1.eml</code></small>
+      </div>
+      <div>
+        <span class="badge" style="background: #064e3b; color: #a7f3d0; border: 1px solid #059669;">Low RISK</span>
+        <span class="score-box">Score: 0</span>
+      </div>
+    </div>
+    
+    <!-- Executive Summary Component -->
+    <div style="margin-top: 1rem;">
+      <h2 style="font-size: 1.1rem; margin-top:0; color: #f8fafc;">Executive Summary &amp; Overall Verdict</h2>
+      <p style="margin: 0.5rem 0 1rem 0; color: var(--text-muted);">
+        Automated forensic evaluation determined an overall verdict of <strong>CLEAN / LOW RISK MAIL</strong> (Risk Score: 0).
+        Review the detailed forensic breakdown and evidence log below.
+      </p>
+      
+      <div class="grid-2">
+        <div class="info-card"><strong>Subject</strong>Reminder: Final-Year Project Submission Deadline</div>
+        <div class="info-card"><strong>From (Author)</strong>GIKI Academics Office &lt;academics@giki.edu.pk&gt;</div>
+        <div class="info-card"><strong>Sender (Transmitter)</strong>-</div>
+        <div class="info-card"><strong>Reply-To</strong>academics@giki.edu.pk</div>
+        <div class="info-card"><strong>Return-Path (Bounce)</strong>-</div>
+        <div class="info-card"><strong>Date</strong>Wed, 15 Jul 2026 08:14:50 +0000</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 1: Header Forensics Analysis -->
+  <details open>
+    <summary>📌 Header Analysis (0 Anomalies Flagged)</summary>
+    <div class="section-content">
+      <p style='color: var(--text-muted);'><em>No header anomalies or spoofing indicators detected.</em></p>
+    </div>
+  </details>
+
+  <!-- Section 2: Authentication Analysis -->
+  <details open>
+    <summary>🛡️ Authentication Analysis (SPF / DKIM / DMARC)</summary>
+    <div class="section-content">
+      <table>
+      <tr><th>Mechanism</th><th>Verdict</th><th>Extracted Details</th></tr>
+      <tr><td><strong>SPF</strong></td><td><span class="badge" style="background: #064e3b; color: #a7f3d0; border: 1px solid #059669;">PASS</span></td><td>smtp.mailfrom=giki.edu.pk</td></tr>
+      <tr><td><strong>DKIM</strong></td><td><span class="badge" style="background: #064e3b; color: #a7f3d0; border: 1px solid #059669;">PASS</span></td><td>header.i=giki.edu.pk</td></tr>
+      <tr><td><strong>DMARC</strong></td><td><span class="badge" style="background: #064e3b; color: #a7f3d0; border: 1px solid #059669;">PASS</span></td><td>-</td></tr>
     </table>
-  </section>
+    <div style="margin-top: 1rem;">
+      <strong>SOC Analysis Summary:</strong> SPF: PASS (Sending server IP is authorized by the domain's SPF record). DKIM: PASS (Cryptographic signature is valid and email content was unaltered in transit). DMARC: PASS (Message satisfies DMARC policy requirements and domain alignment).
+    </div>
+    
+    </div>
+  </details>
 
-  <section>
-    <h2>Authentication Results (SPF / DKIM / DMARC)</h2>
-    <table>
-      <tr><th>SPF</th><th>DKIM</th><th>DMARC</th><th>Source</th></tr>
+  <!-- Section 3: Routing Analysis & Delivery Timeline -->
+  <details open>
+    <summary>🌐 Routing Analysis &amp; Email Delivery Timeline (2 Hops)</summary>
+    <div class="section-content">
+      <table>
+      <tr><th>Hop #</th><th>Timestamp</th><th>Elapsed Delay</th><th>Sending Host (From)</th><th>Receiving Host (By)</th><th>IP &amp; Classification</th><th>Summary / Flags</th></tr>
       <tr>
-        <td>pass</td>
-        <td>pass</td>
-        <td>pass</td>
-        <td>Authentication-Results header</td>
-      </tr>
+              <td><strong>Hop #1</strong></td>
+              <td>2026-07-15T08:14:55+00:00</td>
+              <td><code>Origin</code></td>
+              <td>mail.giki.edu.pk</td>
+              <td>mx-out.giki.edu.pk</td>
+              <td>103.255.4.2 (Public)</td>
+              <td>via ESMTP</td>
+            </tr><tr>
+              <td><strong>Hop #2</strong></td>
+              <td>2026-07-15T08:15:40+00:00</td>
+              <td><code>+45s</code></td>
+              <td>mx-out.giki.edu.pk</td>
+              <td>mx.example.com</td>
+              <td>103.255.4.10 (Public)</td>
+              <td>via ESMTPS</td>
+            </tr>
     </table>
-  </section>
+    <div style="margin-top: 1rem;">
+      <strong>Routing Anomaly Flags:</strong>
+      <ul><li><em>None</em></li></ul>
+    </div>
+    </div>
+  </details>
 
-  <section>
-    <h2>Routing Analysis (Received chain)</h2>
-    <p><strong>Hop count:</strong> 2</p>
-    <table>
-      <tr><th>From host</th><th>By host</th><th>IP</th><th>Timestamp</th></tr>
-      <tr><td>mx-out.giki.edu.pk</td><td>mx.example.com</td><td>103.255.4.10</td><td>2026-07-15T08:15:40+00:00</td></tr><tr><td>mail.giki.edu.pk</td><td>mx-out.giki.edu.pk</td><td>103.255.4.2</td><td>2026-07-15T08:14:55+00:00</td></tr>
+  <!-- Section 4: Triggered Phishing Indicators -->
+  <details open>
+    <summary>⚠️ Triggered Phishing Indicators (0 Signals)</summary>
+    <div class="section-content">
+      <p style='color: var(--text-muted);'><em>No phishing indicators triggered.</em></p>
+    </div>
+  </details>
+
+  <!-- Section 5: Extracted URLs Analysis -->
+  <details open>
+    <summary>🔗 Extracted &amp; Analyzed URLs (1 URLs, 0 Suspicious)</summary>
+    <div class="section-content">
+      <table>
+      <tr><th>Normalized Target URL</th><th>Domain</th><th>Anchor Text</th><th>Forensic Analysis &amp; Findings</th></tr>
+      <tr>
+          <td><code>https://portal.giki.edu.pk/fyp/submit</code></td>
+          <td>portal.giki.edu.pk</td>
+          <td>'https://portal.giki.edu.pk/fyp/submit'</td>
+          <td><span class='badge' style='background: #064e3b; color: #a7f3d0; border: 1px solid #059669;'>CLEAN</span></td>
+        </tr>
     </table>
-    <p><strong>Flags:</strong></p>
-    <ul><li><em>None</em></li></ul>
-  </section>
+    </div>
+  </details>
 
-  <section>
-    <h2>Attachments</h2>
-    <table>
-      <tr><th>Filename</th><th>Declared ext.</th><th>True type</th><th>Size</th><th>SHA-256</th></tr>
-      <tr><td colspan='5'><em>No attachments.</em></td></tr>
-    </table>
-  </section>
+  <!-- Section 6: Attachment Forensics -->
+  <details open>
+    <summary>📎 Attachment Forensics (0 Files)</summary>
+    <div class="section-content">
+      
+      
+    </div>
+  </details>
 
-  <section>
-    <h2>Triggered Phishing Indicators</h2>
-    <table>
-      <tr><th>Signal</th><th>Weight</th><th>Detail</th></tr>
-      <tr><td colspan='3'><em>No phishing indicators triggered.</em></td></tr>
-    </table>
-  </section>
+  <!-- Section 7: Master Incident Evidence Log Table -->
+  <details open>
+    <summary>📂 Master Incident Evidence Log Table</summary>
+    <div class="section-content">
+      <p style='color: var(--text-muted);'><em>No suspicious evidence logged. Email appears legitimate.</em></p>
+    </div>
+  </details>
 
+  <!-- Section 8: SOC Actionable Recommendations & Guidance -->
+  <details open>
+    <summary>📋 SOC Recommendations &amp; Incident Response Guidance</summary>
+    <div class="section-content">
+      <div class="rec-box">
+      <ul style="margin: 0; padding-left: 1.2rem;">
+        <li>✅ <strong>No Action Required:</strong> Message satisfied authentication standards and exhibited low risk.</li>
+      </ul>
+    </div>
+    </div>
+  </details>
+
+  <!-- Section 9: MIME Structure -->
+  <details>
+    <summary>⚙️ Raw MIME Structure</summary>
+    <div class="section-content">
+      <pre style="background: #090d16; padding: 1rem; border-radius: 6px; overflow-x: auto; color: var(--accent);">- text/html</pre>
+    </div>
+  </details>
+
+</div>
 </body>
 </html>

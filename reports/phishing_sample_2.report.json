@@ -1,0 +1,256 @@
+{
+  "file": "phishing_sample_2.eml",
+  "subject": "URGENT: Invoice #98402 Overdue Wire Transfer Required",
+  "from_addr": "Chief Executive Officer <ceo-office@fake-invoice.xyz>",
+  "sender_addr": "",
+  "to_addr": "finance@corp.example.com",
+  "cc_addr": "",
+  "bcc_addr": "",
+  "reply_to": "wire-transfers@attacker-controlled.net",
+  "return_path": "",
+  "date": "Thu, 16 Jul 2026 14:09:40 +0000",
+  "message_id": "<20260716140945.98402@fake-invoice.xyz>",
+  "authentication": {
+    "raw": "mx1.corp.example.com; spf=fail smtp.mailfrom=fake-invoice.xyz; dkim=none; dmarc=fail header.from=corp.example.com",
+    "source": "Authentication-Results header",
+    "spf": "fail",
+    "spf_details": "smtp.mailfrom=fake-invoice.xyz",
+    "dkim": "none",
+    "dkim_details": "header.i=corp.example.com",
+    "dmarc": "fail",
+    "dmarc_details": "",
+    "explanation": "SPF: FAIL (Sending server IP is NOT authorized to send mail on behalf of the domain). DKIM: NONE (Message was not signed with a DKIM signature). DMARC: FAIL (Message failed alignment or authentication, violating domain policy). ANOMALIES DETECTED: Complete Authentication Failure: Both SPF and DKIM failed, violating DMARC policy.",
+    "inconsistencies": [
+      "Complete Authentication Failure: Both SPF and DKIM failed, violating DMARC policy."
+    ],
+    "note": null
+  },
+  "routing": {
+    "hops": [
+      {
+        "hop_number": 1,
+        "raw": "from mailer.fake-invoice.xyz ([198.51.100.99])\tby mx1.corp.example.com with ESMTP id pqr456\tfor <finance@corp.example.com>; Thu, 16 Jul 2026 14:09:45 +0000",
+        "from_host": "mailer.fake-invoice.xyz",
+        "by_host": "mx1.corp.example.com",
+        "ip": "198.51.100.99",
+        "ip_type": "Private (RFC 1918)",
+        "timestamp": "2026-07-16T14:09:45+00:00",
+        "delay_seconds": 0.0,
+        "protocol": "ESMTP",
+        "for_recipient": "finance@corp.example.com",
+        "flags": []
+      },
+      {
+        "hop_number": 2,
+        "raw": "from mx1.corp.example.com ([198.51.100.10])\tby mail.corp.example.com with SMTP id xyz789\tfor <finance@corp.example.com>; Thu, 16 Jul 2026 14:10:00 +0000",
+        "from_host": "mx1.corp.example.com",
+        "by_host": "mail.corp.example.com",
+        "ip": "198.51.100.10",
+        "ip_type": "Private (RFC 1918)",
+        "timestamp": "2026-07-16T14:10:00+00:00",
+        "delay_seconds": 15.0,
+        "protocol": "SMTP",
+        "for_recipient": "finance@corp.example.com",
+        "flags": []
+      }
+    ],
+    "hop_count": 2,
+    "timeline": [
+      {
+        "hop_number": 1,
+        "timestamp": "2026-07-16T14:09:45+00:00",
+        "delay_display": "Origin",
+        "from_host": "mailer.fake-invoice.xyz",
+        "by_host": "mx1.corp.example.com",
+        "ip_info": "198.51.100.99 (Private (RFC 1918))",
+        "summary": "via ESMTP"
+      },
+      {
+        "hop_number": 2,
+        "timestamp": "2026-07-16T14:10:00+00:00",
+        "delay_display": "+15s",
+        "from_host": "mx1.corp.example.com",
+        "by_host": "mail.corp.example.com",
+        "ip_info": "198.51.100.10 (Private (RFC 1918))",
+        "summary": "via SMTP"
+      }
+    ],
+    "flags": []
+  },
+  "attachments": [
+    {
+      "filename": "Overdue_Invoice_98402.xlsm",
+      "declared_extension": "xlsm",
+      "true_type": "zip/office",
+      "size_bytes": 57,
+      "hashes": {
+        "md5": "228b84a08ec99c36e38c8e21443abe63",
+        "sha1": "5a0d9acaeb054524e14780bbe17251d6d5929dba",
+        "sha256": "30b9c9387c6e67d6d93c6a60782c495bbfb730594ad8450695b67ca13ee9194f"
+      },
+      "content_id": null,
+      "mime_type": "application/vnd.ms-excel.sheet.macroEnabled.12",
+      "is_executable": false,
+      "is_script": false,
+      "is_macro_enabled": true,
+      "has_double_extension": false,
+      "is_password_protected": false,
+      "suspicious_name_flag": true,
+      "findings": [
+        "Macro-Enabled Office Document (extension: '.xlsm')",
+        "Social Engineering Lure Filename ('invoice' keyword paired with high-risk file type)"
+      ]
+    }
+  ],
+  "embedded_images": [],
+  "mime_structure": "- multipart/mixed\n  - text/html\n  - application/vnd.ms-excel.sheet.macroenabled.12",
+  "header_findings": [
+    {
+      "title": "From vs. Reply-To Mismatch",
+      "description": "Replies will be directed to an address or domain different from the listed sender.",
+      "risk_level": "High",
+      "evidence": "From: 'ceo-office@fake-invoice.xyz' | Reply-To: 'wire-transfers@attacker-controlled.net'",
+      "recommendation": "Do not reply to this email without verifying the Reply-To recipient identity."
+    },
+    {
+      "title": "High-Risk Top-Level Domain (TLD)",
+      "description": "The sender domain uses top-level domain '.xyz', which is statistically associated with high spam/phishing volume.",
+      "risk_level": "Medium",
+      "evidence": "Domain: 'fake-invoice.xyz' | TLD: '.xyz'",
+      "recommendation": "Exercise elevated caution when opening attachments or links from this domain."
+    }
+  ],
+  "url_analysis": {
+    "urls": [
+      {
+        "raw_url": "http://cheap-deals.xyz/gateway?redirect=https://evil-portal.com",
+        "normalized_url": "http://cheap-deals.xyz/gateway?redirect=https://evil-portal.com",
+        "domain": "cheap-deals.xyz",
+        "anchor_text": "http://corp.example.com/invoice-98402.pdf",
+        "is_ip_based": false,
+        "is_shortener": false,
+        "is_suspicious_domain": true,
+        "is_mismatched_anchor": true,
+        "is_hidden": false,
+        "findings": [
+          "Link domain uses high-risk TLD (.xyz)",
+          "Link contains open-redirect parameter (URL contains open-redirect parameter (?redirect=https://))",
+          "Mismatched Hyperlink: Anchor text displays 'http://corp.example.com/invoice-98402.pdf' but link targets 'cheap-deals.xyz'"
+        ]
+      }
+    ],
+    "total_urls": 1,
+    "suspicious_count": 1,
+    "flags": [
+      "URL 'http://cheap-deals.xyz/gateway?redirect=...': Link domain uses high-risk TLD (.xyz); Link contains open-redirect parameter (URL contains open-redirect parameter (?redirect=https://)); Mismatched Hyperlink: Anchor text displays 'http://corp.example.com/invoice-98402.pdf' but link targets 'cheap-deals.xyz'"
+    ]
+  },
+  "score": 305,
+  "risk_level": "High",
+  "signals": [
+    {
+      "indicator": "Deceptive / Mismatched Hyperlink",
+      "weight": 30,
+      "explanation": "Link anchor text displays a domain different from actual target destination.",
+      "evidence": "Anchor: 'http://corp.example.com/invoice-98402.pdf' | Target: 'cheap-deals.xyz'",
+      "signal": "Deceptive / Mismatched Hyperlink",
+      "detail": "Link anchor text displays a domain different from actual target destination. (Evidence: Anchor: 'http://corp.example.com/invoice-98402.pdf' | Target: 'cheap-deals.xyz')"
+    },
+    {
+      "indicator": "Suspicious Link Domain",
+      "weight": 20,
+      "explanation": "Link targets a domain with high-risk TLD, Punycode, or lookalike patterns.",
+      "evidence": "Domain: 'cheap-deals.xyz'",
+      "signal": "Suspicious Link Domain",
+      "detail": "Link targets a domain with high-risk TLD, Punycode, or lookalike patterns. (Evidence: Domain: 'cheap-deals.xyz')"
+    },
+    {
+      "indicator": "High-Risk Top-Level Domain (TLD)",
+      "weight": 20,
+      "explanation": "Sender domain uses high-risk top-level domain '.xyz'.",
+      "evidence": "Domain: 'fake-invoice.xyz'",
+      "signal": "High-Risk Top-Level Domain (TLD)",
+      "detail": "Sender domain uses high-risk top-level domain '.xyz'. (Evidence: Domain: 'fake-invoice.xyz')"
+    },
+    {
+      "indicator": "Mismatched Sender Domains",
+      "weight": 20,
+      "explanation": "Header From domain does not align with transmitter or bounce address domains.",
+      "evidence": "From Domain: 'fake-invoice.xyz' | Mismatches: Reply-To ('attacker-controlled.net')",
+      "signal": "Mismatched Sender Domains",
+      "detail": "Header From domain does not align with transmitter or bounce address domains. (Evidence: From Domain: 'fake-invoice.xyz' | Mismatches: Reply-To ('attacker-controlled.net'))"
+    },
+    {
+      "indicator": "Multiple / Open Redirect Link Parameter",
+      "weight": 20,
+      "explanation": "Link contains embedded redirect query parameters pointing to a secondary destination.",
+      "evidence": "Link URL: 'http://cheap-deals.xyz/gateway?redirect=https://evil-portal.com'",
+      "signal": "Multiple / Open Redirect Link Parameter",
+      "detail": "Link contains embedded redirect query parameters pointing to a secondary destination. (Evidence: Link URL: 'http://cheap-deals.xyz/gateway?redirect=https://evil-portal.com')"
+    },
+    {
+      "indicator": "Urgent Pressure Tactics",
+      "weight": 25,
+      "explanation": "Email employs artificial time pressure to incite immediate action without due verification.",
+      "evidence": "Matched Phrase: 'within 24 hours'",
+      "signal": "Urgent Pressure Tactics",
+      "detail": "Email employs artificial time pressure to incite immediate action without due verification. (Evidence: Matched Phrase: 'within 24 hours')"
+    },
+    {
+      "indicator": "Financial Scam Language",
+      "weight": 25,
+      "explanation": "Email contains phrasing associated with wire fraud, cryptocurrency, or payment scams.",
+      "evidence": "Matched Phrase: 'wire transfer'",
+      "signal": "Financial Scam Language",
+      "detail": "Email contains phrasing associated with wire fraud, cryptocurrency, or payment scams. (Evidence: Matched Phrase: 'wire transfer')"
+    },
+    {
+      "indicator": "Fake Invoice / BEC Indicators",
+      "weight": 30,
+      "explanation": "Email references fake invoices or purchase orders typical of Business Email Compromise (BEC).",
+      "evidence": "Matched Phrase: 'Invoice #98402'",
+      "signal": "Fake Invoice / BEC Indicators",
+      "detail": "Email references fake invoices or purchase orders typical of Business Email Compromise (BEC). (Evidence: Matched Phrase: 'Invoice #98402')"
+    },
+    {
+      "indicator": "SPF Authentication Failure",
+      "weight": 30,
+      "explanation": "SPF check failed for sender domain 'fake-invoice.xyz'.",
+      "evidence": "SPF Verdict: FAIL | Details: smtp.mailfrom=fake-invoice.xyz",
+      "signal": "SPF Authentication Failure",
+      "detail": "SPF check failed for sender domain 'fake-invoice.xyz'. (Evidence: SPF Verdict: FAIL | Details: smtp.mailfrom=fake-invoice.xyz)"
+    },
+    {
+      "indicator": "DMARC Policy Violation",
+      "weight": 25,
+      "explanation": "DMARC alignment failed \u2014 message violates domain policy.",
+      "evidence": "DMARC Verdict: FAIL | Details: ",
+      "signal": "DMARC Policy Violation",
+      "detail": "DMARC alignment failed \u2014 message violates domain policy. (Evidence: DMARC Verdict: FAIL | Details: )"
+    },
+    {
+      "indicator": "Authentication Inconsistency",
+      "weight": 20,
+      "explanation": "Detected conflicting authentication headers or domain misalignment.",
+      "evidence": "Complete Authentication Failure: Both SPF and DKIM failed, violating DMARC policy.",
+      "signal": "Authentication Inconsistency",
+      "detail": "Detected conflicting authentication headers or domain misalignment. (Evidence: Complete Authentication Failure: Both SPF and DKIM failed, violating DMARC policy.)"
+    },
+    {
+      "indicator": "Header Forensics: From vs. Reply-To Mismatch",
+      "weight": 25,
+      "explanation": "Replies will be directed to an address or domain different from the listed sender.",
+      "evidence": "[High] From: 'ceo-office@fake-invoice.xyz' | Reply-To: 'wire-transfers@attacker-controlled.net'",
+      "signal": "Header Forensics: From vs. Reply-To Mismatch",
+      "detail": "Replies will be directed to an address or domain different from the listed sender. (Evidence: [High] From: 'ceo-office@fake-invoice.xyz' | Reply-To: 'wire-transfers@attacker-controlled.net')"
+    },
+    {
+      "indicator": "Header Forensics: High-Risk Top-Level Domain (TLD)",
+      "weight": 15,
+      "explanation": "The sender domain uses top-level domain '.xyz', which is statistically associated with high spam/phishing volume.",
+      "evidence": "[Medium] Domain: 'fake-invoice.xyz' | TLD: '.xyz'",
+      "signal": "Header Forensics: High-Risk Top-Level Domain (TLD)",
+      "detail": "The sender domain uses top-level domain '.xyz', which is statistically associated with high spam/phishing volume. (Evidence: [Medium] Domain: 'fake-invoice.xyz' | TLD: '.xyz')"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+Delivered-To: finance@corp.example.com
+Received: from mx1.corp.example.com ([198.51.100.10])
+	by mail.corp.example.com with SMTP id xyz789
+	for <finance@corp.example.com>; Thu, 16 Jul 2026 14:10:00 +0000
+Received: from mailer.fake-invoice.xyz ([198.51.100.99])
+	by mx1.corp.example.com with ESMTP id pqr456
+	for <finance@corp.example.com>; Thu, 16 Jul 2026 14:09:45 +0000
+Authentication-Results: mx1.corp.example.com; spf=fail smtp.mailfrom=fake-invoice.xyz;
+ dkim=none; dmarc=fail header.from=corp.example.com
+From: "Chief Executive Officer" <ceo-office@fake-invoice.xyz>
+Reply-To: wire-transfers@attacker-controlled.net
+To: finance@corp.example.com
+Subject: URGENT: Invoice #98402 Overdue Wire Transfer Required
+Message-ID: <20260716140945.98402@fake-invoice.xyz>
+Date: Thu, 16 Jul 2026 14:09:40 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="ATTACH_BOUND_456"
+
+--ATTACH_BOUND_456
+Content-Type: text/html; charset="utf-8"
+
+<html><body>
+<p>Attention Finance Team,</p>
+<p>Please process immediate wire transfer for overdue Invoice #98402 within 24 hours.</p>
+<p>Download your remittance statement: <a href="http://cheap-deals.xyz/gateway?redirect=https://evil-portal.com">http://corp.example.com/invoice-98402.pdf</a></p>
+<p>Thank you,<br>CEO Office</p>
+</body></html>
+
+--ATTACH_BOUND_456
+Content-Type: application/vnd.ms-excel.sheet.macroEnabled.12; name="Overdue_Invoice_98402.xlsm"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="Overdue_Invoice_98402.xlsm"
+
+UEsDBBQABgAIAAAAIQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+--ATTACH_BOUND_456--

@@ -1,34 +1,80 @@
 {
   "file": "phishing_sample_1.eml",
   "subject": "Urgent: Your account has been limited",
-  "from": "\"PayPal Security\" <no-reply@paypa1-secure.com>",
+  "from_addr": "PayPal Security <no-reply@paypa1-secure.com>",
+  "sender_addr": "",
+  "to_addr": "victim@example.com",
+  "cc_addr": "",
+  "bcc_addr": "",
+  "reply_to": "security-support@totally-not-paypal.info",
+  "return_path": "",
   "date": "Wed, 15 Jul 2026 09:40:00 +0000",
   "message_id": "<20260715094012.ABC123@paypa1-secure.com>",
   "authentication": {
-    "raw": "mx.example.com; spf=fail smtp.mailfrom=paypa1-secure.com;\n dkim=fail header.d=paypa1-secure.com; dmarc=fail header.from=paypa1-secure.com",
+    "raw": "mx.example.com; spf=fail smtp.mailfrom=paypa1-secure.com; dkim=fail header.d=paypa1-secure.com; dmarc=fail header.from=paypa1-secure.com",
     "source": "Authentication-Results header",
     "spf": "fail",
+    "spf_details": "smtp.mailfrom=paypa1-secure.com",
     "dkim": "fail",
-    "dmarc": "fail"
+    "dkim_details": "header.i=paypa1-secure.com",
+    "dmarc": "fail",
+    "dmarc_details": "",
+    "explanation": "SPF: FAIL (Sending server IP is NOT authorized to send mail on behalf of the domain). DKIM: FAIL (Cryptographic signature failed or body/headers were modified). DMARC: FAIL (Message failed alignment or authentication, violating domain policy). ANOMALIES DETECTED: Complete Authentication Failure: Both SPF and DKIM failed, violating DMARC policy.",
+    "inconsistencies": [
+      "Complete Authentication Failure: Both SPF and DKIM failed, violating DMARC policy."
+    ],
+    "note": null
   },
   "routing": {
     "hops": [
       {
-        "raw": "from unknown-relay.ru ([185.220.101.7])\n\tby mx.example.com with SMTP id abc123\n\tfor <victim@example.com>; Wed, 15 Jul 2026 09:41:12 +0000",
-        "from_host": "unknown-relay.ru",
-        "by_host": "mx.example.com",
-        "ip": "185.220.101.7",
-        "timestamp": "2026-07-15T09:41:12+00:00"
-      },
-      {
-        "raw": "from mail.paypa1-secure.com ([203.0.113.44])\n\tby unknown-relay.ru with ESMTP id def456\n\tfor <victim@example.com>; Wed, 15 Jul 2026 09:40:02 +0000",
+        "hop_number": 1,
+        "raw": "from mail.paypa1-secure.com ([203.0.113.44])\tby unknown-relay.ru with ESMTP id def456\tfor <victim@example.com>; Wed, 15 Jul 2026 09:40:02 +0000",
         "from_host": "mail.paypa1-secure.com",
         "by_host": "unknown-relay.ru",
         "ip": "203.0.113.44",
-        "timestamp": "2026-07-15T09:40:02+00:00"
+        "ip_type": "Private (RFC 1918)",
+        "timestamp": "2026-07-15T09:40:02+00:00",
+        "delay_seconds": 0.0,
+        "protocol": "ESMTP",
+        "for_recipient": "victim@example.com",
+        "flags": []
+      },
+      {
+        "hop_number": 2,
+        "raw": "from unknown-relay.ru ([185.220.101.7])\tby mx.example.com with SMTP id abc123\tfor <victim@example.com>; Wed, 15 Jul 2026 09:41:12 +0000",
+        "from_host": "unknown-relay.ru",
+        "by_host": "mx.example.com",
+        "ip": "185.220.101.7",
+        "ip_type": "Public",
+        "timestamp": "2026-07-15T09:41:12+00:00",
+        "delay_seconds": 70.0,
+        "protocol": "SMTP",
+        "for_recipient": "victim@example.com",
+        "flags": []
       }
     ],
     "hop_count": 2,
+    "timeline": [
+      {
+        "hop_number": 1,
+        "timestamp": "2026-07-15T09:40:02+00:00",
+        "delay_display": "Origin",
+        "from_host": "mail.paypa1-secure.com",
+        "by_host": "unknown-relay.ru",
+        "ip_info": "203.0.113.44 (Private (RFC 1918))",
+        "summary": "via ESMTP"
+      },
+      {
+        "hop_number": 2,
+        "timestamp": "2026-07-15T09:41:12+00:00",
+        "delay_display": "+1m 10s",
+        "from_host": "unknown-relay.ru",
+        "by_host": "mx.example.com",
+        "ip_info": "185.220.101.7 (Public)",
+        "summary": "via SMTP"
+      }
+    ],
     "flags": []
   },
   "attachments": [
@@ -41,51 +87,169 @@
         "md5": "553cadd2acb20724217cab0b3511fbef",
         "sha1": "d3c03cb4182215d441125090ada0ccbe978cab08",
         "sha256": "234aeb2ff6536c952186fa3b8ce83a24d2ca6a1c0d3165f7b6a78312d89d768f"
-      }
+      },
+      "content_id": null,
+      "mime_type": "application/x-msdownload",
+      "is_executable": true,
+      "is_script": false,
+      "is_macro_enabled": false,
+      "has_double_extension": true,
+      "is_password_protected": false,
+      "suspicious_name_flag": true,
+      "findings": [
+        "Executable File Detected (extension: '.exe', true signature: 'exe')",
+        "Double Extension Masking Attack Detected ('Account_Statement.pdf.exe')",
+        "Social Engineering Lure Filename ('statement' keyword paired with high-risk file type)"
+      ]
     }
   ],
-  "score": 175,
+  "embedded_images": [],
+  "mime_structure": "- multipart/mixed\n  - text/html\n  - application/octet-stream",
+  "header_findings": [
+    {
+      "title": "Display Name Brand Impersonation",
+      "description": "The display name references brand 'paypal', but the actual sending domain is 'paypa1-secure.com'.",
+      "risk_level": "High",
+      "evidence": "Display Name: 'PayPal Security' | Sending Domain: 'paypa1-secure.com'",
+      "recommendation": "Verify sender identity out-of-band; domain does not belong to the referenced brand."
+    },
+    {
+      "title": "From vs. Reply-To Mismatch",
+      "description": "Replies will be directed to an address or domain different from the listed sender.",
+      "risk_level": "High",
+      "evidence": "From: 'no-reply@paypa1-secure.com' | Reply-To: 'security-support@totally-not-paypal.info'",
+      "recommendation": "Do not reply to this email without verifying the Reply-To recipient identity."
+    }
+  ],
+  "url_analysis": {
+    "urls": [
+      {
+        "raw_url": "http://185.220.101.7/verify-account/login.php",
+        "normalized_url": "http://185.220.101.7/verify-account/login.php",
+        "domain": "185.220.101.7",
+        "anchor_text": "Click here to verify your account",
+        "is_ip_based": true,
+        "is_shortener": false,
+        "is_suspicious_domain": false,
+        "is_mismatched_anchor": false,
+        "is_hidden": false,
+        "findings": [
+          "Link target is a raw IP address (185.220.101.7)"
+        ]
+      }
+    ],
+    "total_urls": 1,
+    "suspicious_count": 1,
+    "flags": [
+      "URL 'http://185.220.101.7/verify-account/logi...': Link target is a raw IP address (185.220.101.7)"
+    ]
+  },
+  "score": 335,
   "risk_level": "High",
   "signals": [
     {
-      "signal": "spf_fail",
+      "indicator": "IP-Based Link Target",
+      "weight": 25,
+      "explanation": "Link target uses a raw IP address instead of a domain name.",
+      "evidence": "Target: 'http://185.220.101.7/verify-account/login.php'",
+      "signal": "IP-Based Link Target",
+      "detail": "Link target uses a raw IP address instead of a domain name. (Evidence: Target: 'http://185.220.101.7/verify-account/login.php')"
+    },
+    {
+      "indicator": "Display Name Impersonation",
+      "weight": 25,
+      "explanation": "Display name references known brand 'paypal', but actual sending domain is 'paypa1-secure.com'.",
+      "evidence": "Display Name: 'PayPal Security' | From: 'no-reply@paypa1-secure.com'",
+      "signal": "Display Name Impersonation",
+      "detail": "Display name references known brand 'paypal', but actual sending domain is 'paypa1-secure.com'. (Evidence: Display Name: 'PayPal Security' | From: 'no-reply@paypa1-secure.com')"
+    },
+    {
+      "indicator": "Mismatched Sender Domains",
+      "weight": 20,
+      "explanation": "Header From domain does not align with transmitter or bounce address domains.",
+      "evidence": "From Domain: 'paypa1-secure.com' | Mismatches: Reply-To ('totally-not-paypal.info')",
+      "signal": "Mismatched Sender Domains",
+      "detail": "Header From domain does not align with transmitter or bounce address domains. (Evidence: From Domain: 'paypa1-secure.com' | Mismatches: Reply-To ('totally-not-paypal.info'))"
+    },
+    {
+      "indicator": "IP-Based Link Target",
+      "weight": 25,
+      "explanation": "Link target uses a raw IP address instead of a domain name.",
+      "evidence": "Link URL: 'http://185.220.101.7/verify-account/login.php'",
+      "signal": "IP-Based Link Target",
+      "detail": "Link target uses a raw IP address instead of a domain name. (Evidence: Link URL: 'http://185.220.101.7/verify-account/login.php')"
+    },
+    {
+      "indicator": "Credential Harvesting Language",
       "weight": 30,
-      "detail": "SPF check failed for sender domain 'paypa1-secure.com'."
+      "explanation": "Email uses phrasing aimed at tricking recipients into revealing account credentials.",
+      "evidence": "Matched Phrase: 'verify your account'",
+      "signal": "Credential Harvesting Language",
+      "detail": "Email uses phrasing aimed at tricking recipients into revealing account credentials. (Evidence: Matched Phrase: 'verify your account')"
     },
     {
-      "signal": "dkim_fail",
+      "indicator": "Urgent Pressure Tactics",
+      "weight": 25,
+      "explanation": "Email employs artificial time pressure to incite immediate action without due verification.",
+      "evidence": "Matched Phrase: 'within 24 hours'",
+      "signal": "Urgent Pressure Tactics",
+      "detail": "Email employs artificial time pressure to incite immediate action without due verification. (Evidence: Matched Phrase: 'within 24 hours')"
+    },
+    {
+      "indicator": "SPF Authentication Failure",
       "weight": 30,
-      "detail": "DKIM signature failed verification."
+      "explanation": "SPF check failed for sender domain 'paypa1-secure.com'.",
+      "evidence": "SPF Verdict: FAIL | Details: smtp.mailfrom=paypa1-secure.com",
+      "signal": "SPF Authentication Failure",
+      "detail": "SPF check failed for sender domain 'paypa1-secure.com'. (Evidence: SPF Verdict: FAIL | Details: smtp.mailfrom=paypa1-secure.com)"
     },
     {
-      "signal": "dmarc_fail",
+      "indicator": "DKIM Signature Failure",
+      "weight": 30,
+      "explanation": "DKIM cryptographic signature failed verification.",
+      "evidence": "DKIM Verdict: FAIL | Details: header.i=paypa1-secure.com",
+      "signal": "DKIM Signature Failure",
+      "detail": "DKIM cryptographic signature failed verification. (Evidence: DKIM Verdict: FAIL | Details: header.i=paypa1-secure.com)"
+    },
+    {
+      "indicator": "DMARC Policy Violation",
       "weight": 25,
-      "detail": "DMARC alignment failed \u2014 message does not meet the domain's stated policy."
+      "explanation": "DMARC alignment failed \u2014 message violates domain policy.",
+      "evidence": "DMARC Verdict: FAIL | Details: ",
+      "signal": "DMARC Policy Violation",
+      "detail": "DMARC alignment failed \u2014 message violates domain policy. (Evidence: DMARC Verdict: FAIL | Details: )"
     },
     {
-      "signal": "lookalike_domain",
+      "indicator": "Authentication Inconsistency",
+      "weight": 20,
+      "explanation": "Detected conflicting authentication headers or domain misalignment.",
+      "evidence": "Complete Authentication Failure: Both SPF and DKIM failed, violating DMARC policy.",
+      "signal": "Authentication Inconsistency",
+      "detail": "Detected conflicting authentication headers or domain misalignment. (Evidence: Complete Authentication Failure: Both SPF and DKIM failed, violating DMARC policy.)"
+    },
+    {
+      "indicator": "Header Forensics: Display Name Brand Impersonation",
       "weight": 25,
-      "detail": "Sender domain 'paypa1-secure.com' closely resembles the known brand domain 'paypal.com'."
+      "explanation": "The display name references brand 'paypal', but the actual sending domain is 'paypa1-secure.com'.",
+      "evidence": "[High] Display Name: 'PayPal Security' | Sending Domain: 'paypa1-secure.com'",
+      "signal": "Header Forensics: Display Name Brand Impersonation",
+      "detail": "The display name references brand 'paypal', but the actual sending domain is 'paypa1-secure.com'. (Evidence: [High] Display Name: 'PayPal Security' | Sending Domain: 'paypa1-secure.com')"
     },
     {
-      "signal": "display_name_mismatch",
-      "weight": 15,
-      "detail": "Display name ('PayPal Security') references 'paypal', but the actual sending address is 'no-reply@paypa1-secure.com' \u2014 mismatch suggests impersonation."
-    },
-    {
-      "signal": "reply_to_mismatch",
-      "weight": 10,
-      "detail": "Reply-To ('security-support@totally-not-paypal.info') differs from From ('no-reply@paypa1-secure.com') \u2014 replies would be silently redirected."
-    },
-    {
-      "signal": "risky_link",
-      "weight": 15,
-      "detail": "Link 'Click here to verify your account' -> http://185.220.101.7/verify-account/login.php: link target is a raw IP address (185.220.101.7)."
-    },
-    {
-      "signal": "risky_attachment",
+      "indicator": "Header Forensics: From vs. Reply-To Mismatch",
       "weight": 25,
-      "detail": "Attachment 'Account_Statement.pdf.exe': declared extension '.exe' is executable/script type; filename uses a double extension (e.g. invoice.pdf.exe)."
+      "explanation": "Replies will be directed to an address or domain different from the listed sender.",
+      "evidence": "[High] From: 'no-reply@paypa1-secure.com' | Reply-To: 'security-support@totally-not-paypal.info'",
+      "signal": "Header Forensics: From vs. Reply-To Mismatch",
+      "detail": "Replies will be directed to an address or domain different from the listed sender. (Evidence: [High] From: 'no-reply@paypa1-secure.com' | Reply-To: 'security-support@totally-not-paypal.info')"
+    },
+    {
+      "indicator": "Executable / Suspicious Attachment",
+      "weight": 30,
+      "explanation": "Attachment contains risky extensions or signature mismatch.",
+      "evidence": "Filename: 'Account_Statement.pdf.exe' | Issues: executable/script extension '.exe'; double extension (e.g. invoice.pdf.exe)",
+      "signal": "Executable / Suspicious Attachment",
+      "detail": "Attachment contains risky extensions or signature mismatch. (Evidence: Filename: 'Account_Statement.pdf.exe' | Issues: executable/script extension '.exe'; double extension (e.g. invoice.pdf.exe))"
     }
   ]
 }
