@@ -2,86 +2,137 @@
 """Email Forensics & Phishing Analyzer — CLI entry point.
 
 Usage:
-    python main.py --input samples/ --output reports/
-    python main.py --input samples/phishing_sample_1.eml --output reports/
+    python src/main.py --input samples/ --output reports/
 """
 
 import argparse
 import json
 import os
 import sys
+import dataclasses
 
-from ingest import discover_messages, load_message, IngestError
+from ingest import discover_messages, load_message
 from parsing import parse_message
+from header_analysis import analyze_headers
+from url_analysis import analyze_urls
+from attachment_analysis import analyze_attachments
 from auth_checks import analyse_authentication, live_reverify
 from routing import analyse_routing
 from scoring import score_message
-from report import build_finding, write_html_report, write_json_report
+from report import build_finding, write_html_report, write_json_report, write_pdf_report
+from exceptions import AnalyzerError, IngestionError
+from models import Finding
+from logger import get_logger
+
+import logging
+
+logger = get_logger(__name__)
 
 
-def analyse_one(path: str) -> dict:
-    msg = load_message(path)
-    parsed = parse_message(msg)
+class AnalyzerPipeline:
+    def __init__(self, output_dir: str):
+        self.output_dir = output_dir
+        os.makedirs(self.output_dir, exist_ok=True)
 
-    auth = live_reverify(parsed) or analyse_authentication(parsed)
-    routing = analyse_routing(parsed)
-    scoring = score_message(parsed, auth, routing)
+    def analyse_one(self, path: str) -> Finding:
+        logger.info(f"Analyzing {path}...")
+        
+        # Phase 1: Ingestion
+        msg = load_message(path)
+        
+        # Phase 2: Parsing
+        parsed = parse_message(msg)
+        
+        # Phase 2.2: Attachment Forensics Engine
+        parsed.attachments = analyze_attachments(parsed)
+        
+        # Phase 2.4: URL Analysis Engine
+        url_verdict = analyze_urls(parsed)
 
-    return build_finding(path, parsed, auth, routing, scoring)
+        # Phase 2.5: Header Forensics Analysis
+        header_verdict = analyze_headers(parsed)
+        
+        # Phase 3-4: Authentication
+        auth = live_reverify(parsed) or analyse_authentication(parsed)
+        
+        # Phase 5: Routing
+        routing = analyse_routing(parsed)
+        
+        # Phase 6: Scoring
+        scoring = score_message(parsed, auth, routing, header_verdict, url_verdict)
+        
+        # Phase 7: Finding assembly
+        finding = build_finding(path, parsed, auth, routing, scoring, header_verdict, url_verdict)
+        return finding
+
+
+
+    def run(self, input_path: str):
+        try:
+            paths = discover_messages(input_path)
+        except IngestionError as e:
+            logger.critical(f"Input error: {e}")
+            sys.exit(1)
+
+        if not paths:
+            logger.error(f"No .eml/.msg files found under: {input_path}")
+            sys.exit(1)
+
+        summary = []
+        for path in paths:
+            name = os.path.splitext(os.path.basename(path))[0]
+            try:
+                finding = self.analyse_one(path)
+            except AnalyzerError as e:
+                logger.error(f"Skipping {path} due to analysis error: {e}")
+                continue
+            except Exception as e:
+                logger.exception(f"Unexpected failure analysing {path}: {e}")
+                continue
+
+            html_path = os.path.join(self.output_dir, f"{name}.report.html")
+            json_path = os.path.join(self.output_dir, f"{name}.report.json")
+            pdf_path = os.path.join(self.output_dir, f"{name}.report.pdf")
+            
+            write_html_report(finding, html_path)
+            write_json_report(finding, json_path)
+            write_pdf_report(finding, pdf_path)
+
+            summary.append({
+                "file": os.path.basename(path),
+                "subject": finding.subject,
+                "from": finding.from_addr,
+                "score": finding.score,
+                "risk_level": finding.risk_level,
+                "report_html": html_path,
+                "report_pdf": pdf_path,
+            })
+
+
+            print(f"[{finding.risk_level:<6}] score={finding.score:<4} {os.path.basename(path)}  ->  {html_path}")
+
+        summary.sort(key=lambda x: x["score"], reverse=True)
+        summary_path = os.path.join(self.output_dir, "summary.json")
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, indent=2)
+
+        print(f"\nAnalysed {len(summary)} message(s). Summary: {summary_path}")
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Email Forensics & Phishing Analyzer")
+    ap = argparse.ArgumentParser(description="SOC-Ready Email Forensics & Phishing Analyzer")
     ap.add_argument("--input", "-i", required=True, help="Path to a .eml/.msg file or a folder of them")
     ap.add_argument("--output", "-o", default="reports", help="Output folder for reports (default: reports/)")
+    ap.add_argument("--verbose", "-v", action="store_true", help="Enable verbose DEBUG logging")
     args = ap.parse_args()
 
-    os.makedirs(args.output, exist_ok=True)
+    if args.verbose:
+        get_logger("").setLevel(logging.DEBUG)
 
-    try:
-        paths = discover_messages(args.input)
-    except IngestError as e:
-        print(f"Error: {e}", file=sys.stderr)
-        sys.exit(1)
-
-    if not paths:
-        print(f"No .eml/.msg files found under: {args.input}", file=sys.stderr)
-        sys.exit(1)
-
-    summary = []
-    for path in paths:
-        name = os.path.splitext(os.path.basename(path))[0]
-        try:
-            finding = analyse_one(path)
-        except IngestError as e:
-            print(f"Skipping {path}: {e}", file=sys.stderr)
-            continue
-        except Exception as e:
-            print(f"Failed to analyse {path}: {e}", file=sys.stderr)
-            continue
-
-        html_path = os.path.join(args.output, f"{name}.report.html")
-        json_path = os.path.join(args.output, f"{name}.report.json")
-        write_html_report(finding, html_path)
-        write_json_report(finding, json_path)
-
-        summary.append({
-            "file": os.path.basename(path),
-            "subject": finding["subject"],
-            "from": finding["from"],
-            "score": finding["score"],
-            "risk_level": finding["risk_level"],
-            "report_html": html_path,
-        })
-
-        print(f"[{finding['risk_level']:<6}] score={finding['score']:<4} {os.path.basename(path)}  ->  {html_path}")
-
-    summary.sort(key=lambda x: x["score"], reverse=True)
-    with open(os.path.join(args.output, "summary.json"), "w") as f:
-        json.dump(summary, f, indent=2)
-
-    print(f"\nAnalysed {len(summary)} message(s). Summary: {os.path.join(args.output, 'summary.json')}")
+    pipeline = AnalyzerPipeline(output_dir=args.output)
+    pipeline.run(args.input)
 
 
 if __name__ == "__main__":
     main()
+

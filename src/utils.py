@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 # --- Hashing -----------------------------------------------------------
 
-def hash_bytes(data: bytes) -> dict:
+def hash_bytes(data: bytes) -> dict[str, str]:
     return {
         "md5": hashlib.md5(data).hexdigest(),
         "sha1": hashlib.sha1(data).hexdigest(),
@@ -45,60 +45,104 @@ def extract_display_name(header_value: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-# A small, illustrative list of commonly-spoofed brand domains.
-# Expand this list for real use (see README roadmap).
-KNOWN_BRAND_DOMAINS = [
-    "paypal.com", "microsoft.com", "apple.com", "google.com", "amazon.com",
-    "bankofamerica.com", "chase.com", "wellsfargo.com", "dhl.com", "fedex.com",
-    "hbl.com", "ubl.com.pk", "meezanbank.com",
+TARGET_BRANDS = [
+    "paypal", "microsoft", "google", "apple", "amazon", "netflix",
+    "facebook", "instagram", "linkedin", "docusign", "office365",
+    "outlook", "bankofamerica", "chase", "wellsfargo", "citibank",
+    "dhl", "fedex", "ups", "usps", "coinbase", "binance",
+    "quickbooks", "xero", "dropbox", "adobe", "stripe", "square",
+    "barclays", "hsbc", "schwab", "fidelity", "verizon", "att"
 ]
+
+KNOWN_BRAND_DOMAINS = [f"{b}.com" for b in TARGET_BRANDS]
+
 
 
 def looks_like_lookalike(domain: str) -> str | None:
-    """Very simple heuristic: flag domains that are a near-miss of a known
-    brand domain (digit-for-letter swaps, added hyphens/suffixes, extra
-    subdomains). Returns the brand it resembles, or None.
-
-    This is intentionally simple — see README roadmap for a proper
-    Levenshtein/confusable-character upgrade.
-    """
+    """Check if domain is a lookalike of a target brand using Levenshtein & homoglyph distance."""
     if not domain:
         return None
+    d = domain.lower().split(".")[0]
+    
+    # Character substitutions (homoglyphs)
+    normalized = (
+        d.replace("0", "o")
+        .replace("1", "l")
+        .replace("3", "e")
+        .replace("5", "s")
+        .replace("8", "b")
+        .replace("@", "a")
+        .replace("-", "")
+    )
 
-    def deleet(s: str) -> str:
-        return (
-            s.replace("0", "o")
-            .replace("1", "l")
-            .replace("3", "e")
-            .replace("5", "s")
-        )
-
-    domain_norm = deleet(domain)
-    domain_first_label = deleet(domain.split(".")[0]).replace("-", "")
-
-    for brand in KNOWN_BRAND_DOMAINS:
-        if domain == brand:
-            continue  # exact match is fine, not a lookalike
-        brand_root = brand.split(".")[0]  # e.g. "paypal" from "paypal.com"
-        brand_no_hyphen = brand.replace("-", "")
-
-        # Full-domain near-miss (digit/letter swap across the whole domain).
-        if domain_norm.replace("-", "") == brand_no_hyphen:
+    for brand in TARGET_BRANDS:
+        if d == brand:
+            continue
+        
+        # Exact match after character substitution (e.g., paypa1 -> paypal, micros0ft -> microsoft)
+        if normalized == brand:
             return brand
 
-        # Brand name embedded as a prefix of the first label, with extra
-        # suffix tacked on — e.g. "paypa1-secure.com", "paypalverify.com".
-        if domain_first_label.startswith(brand_root) and domain_first_label != brand_root:
+        # Levenshtein distance check for typosquatting (1 or 2 character edits)
+        dist = _levenshtein(d, brand)
+        if 1 <= dist <= 2 and len(brand) >= 5:
+            return brand
+
+        dist_norm = _levenshtein(normalized, brand)
+        if 1 <= dist_norm <= 2 and len(brand) >= 5:
             return brand
 
     return None
 
 
-# --- URL helpers ---------------------------------------------------------
+def _levenshtein(s1: str, s2: str) -> int:
+    if len(s1) < len(s2):
+        return _levenshtein(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
+
+
+# --- URL & Domain helpers -------------------------------------------------
 
 SHORTENER_DOMAINS = {"bit.ly", "tinyurl.com", "goo.gl", "t.co", "ow.ly", "is.gd"}
 
 IP_HOST_RE = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
+REDIRECT_PARAM_RE = re.compile(r"[?&](?:url|redirect|dest|goto|target|link|next|r)=https?%3A%2F%2F|[?&](?:url|redirect|dest|goto|target|link|next|r)=https?://", re.IGNORECASE)
+
+
+def is_punycode_or_unicode(domain: str) -> str | None:
+    """Check if domain uses Internationalized Domain Names (IDN) / Punycode or non-ASCII characters."""
+    if not domain:
+        return None
+    if "xn--" in domain.lower():
+        return f"Punycode encoded domain ({domain})"
+    try:
+        domain.encode("ascii")
+    except UnicodeEncodeError:
+        return f"Non-ASCII Unicode characters in domain ({domain})"
+    return None
+
+
+def detect_redirect_param(url: str) -> str | None:
+    """Check if URL contains open-redirect query parameters pointing to another URL."""
+    if not url:
+        return None
+    match = REDIRECT_PARAM_RE.search(url)
+    if match:
+        return f"URL contains open-redirect parameter ({match.group(0)})"
+    return None
 
 
 def url_is_risky(url: str) -> str | None:
@@ -114,10 +158,14 @@ def url_is_risky(url: str) -> str | None:
         return f"link target is a raw IP address ({host})"
     if host in SHORTENER_DOMAINS:
         return f"link uses a URL shortener ({host})"
+    redirect = detect_redirect_param(url)
+    if redirect:
+        return redirect
     return None
 
 
 # --- Attachment signature sniffing (no external deps) --------------------
+
 
 MAGIC_SIGNATURES = [
     (b"MZ", "exe"),

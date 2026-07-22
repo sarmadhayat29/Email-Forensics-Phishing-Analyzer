@@ -1,48 +1,96 @@
 """Stage 1 — Ingestion.
 
 Loads raw message files from disk. .eml files are read with the standard
-library. .msg (Outlook) support is stubbed behind an optional dependency
-(extract-msg) so the tool still runs without it installed.
+library using modern policies. .msg (Outlook) support is stubbed behind an optional dependency.
 """
 
 import email
+from email import policy
 import os
 from email.message import Message
 
+from exceptions import IngestionError, MalformedEmailError
+from logger import get_logger
 
-class IngestError(Exception):
-    pass
+logger = get_logger(__name__)
 
 
 def load_eml(path: str) -> Message:
-    with open(path, "rb") as f:
-        return email.message_from_binary_file(f)
+    logger.debug(f"Loading .eml file: {path}")
+    try:
+        with open(path, "rb") as f:
+            msg = email.message_from_binary_file(f, policy=policy.default)
+            if not msg:
+                raise MalformedEmailError(f"File {path} is empty or unparsable.")
+            return msg
+    except OSError as e:
+        logger.error(f"Failed to read file {path}: {e}")
+        raise IngestionError(f"Cannot read file {path}: {e}") from e
+    except Exception as e:
+        logger.error(f"Malformed .eml content in {path}: {e}")
+        raise MalformedEmailError(f"Malformed .eml content in {path}") from e
 
 
 def load_msg(path: str) -> Message:
-    """Load an Outlook .msg file and normalise it into an email.Message.
-
-    Requires the optional `extract-msg` package. Raises IngestError with a
-    clear message if it isn't installed, rather than crashing the whole run.
-    """
+    """Load an Outlook .msg file and normalise it into an email.Message."""
+    logger.debug(f"Loading .msg file: {path}")
     try:
         import extract_msg  # type: ignore
     except ImportError as exc:
-        raise IngestError(
+        raise IngestionError(
             "extract-msg is not installed — .msg support is disabled. "
             "Run: pip install extract-msg --break-system-packages"
         ) from exc
 
-    msg = extract_msg.Message(path)
-    # Build a minimal RFC822-style message so the rest of the pipeline
-    # (which expects an email.message.Message) can treat it uniformly.
-    eml = email.message.EmailMessage()
-    eml["From"] = msg.sender or ""
-    eml["To"] = msg.to or ""
-    eml["Subject"] = msg.subject or ""
-    eml["Date"] = str(msg.date) if msg.date else ""
-    eml.set_content(msg.body or "")
-    return eml
+    try:
+        msg = extract_msg.Message(path)
+        eml = email.message.EmailMessage(policy=policy.default)
+        
+        # 1. Map headers natively if available, otherwise reconstruct them
+        if getattr(msg, "header", None):
+            from email.parser import HeaderParser
+            hp = HeaderParser(policy=policy.default)
+            parsed_headers = hp.parsestr(str(msg.header))
+            for k, v in parsed_headers.items():
+                eml[k] = v
+        else:
+            eml["From"] = msg.sender or ""
+            eml["To"] = msg.to or ""
+            eml["Cc"] = msg.cc or ""
+            eml["Bcc"] = msg.bcc or ""
+            eml["Subject"] = msg.subject or ""
+            eml["Date"] = msg.date or ""
+            if msg.messageId:
+                eml["Message-ID"] = msg.messageId
+
+        # 2. Reconstruct Body (Plain / HTML)
+        html_body = getattr(msg, "htmlBody", None)
+        if html_body:
+            eml.set_content(msg.body or "")
+            html_text = html_body.decode('utf-8', errors='replace') if isinstance(html_body, bytes) else str(html_body)
+            eml.add_alternative(html_text, subtype='html')
+        else:
+            eml.set_content(msg.body or "")
+
+        # 3. Reconstruct Attachments & Embedded Images
+        for att in msg.attachments:
+            filename = getattr(att, "longFilename", getattr(att, "shortFilename", "unnamed"))
+            data = getattr(att, "data", b"")
+            eml.add_attachment(data, maintype="application", subtype="octet-stream", filename=filename)
+            
+            # If it's an embedded image, it will have a Content-ID
+            cid = getattr(att, "cid", None)
+            if cid:
+                # Get the last added part and append the CID
+                payload = eml.get_payload()
+                if isinstance(payload, list) and len(payload) > 0:
+                    payload[-1].add_header('Content-ID', f"<{cid}>")
+                    payload[-1].replace_header('Content-Disposition', 'inline')
+
+        return eml
+    except Exception as e:
+        logger.error(f"Failed to parse .msg file {path}: {e}")
+        raise IngestionError(f"Failed to parse .msg file {path}: {e}") from e
 
 
 def load_message(path: str) -> Message:
@@ -51,7 +99,7 @@ def load_message(path: str) -> Message:
         return load_eml(path)
     if ext == ".msg":
         return load_msg(path)
-    raise IngestError(f"Unsupported file type: {ext} (expected .eml or .msg)")
+    raise IngestionError(f"Unsupported file type: {ext} (expected .eml or .msg)")
 
 
 def discover_messages(input_path: str) -> list[str]:
@@ -65,4 +113,5 @@ def discover_messages(input_path: str) -> list[str]:
                 if name.lower().endswith((".eml", ".msg")):
                     found.append(os.path.join(root, name))
         return sorted(found)
-    raise IngestError(f"Input path not found: {input_path}")
+    raise IngestionError(f"Input path not found: {input_path}")
+
