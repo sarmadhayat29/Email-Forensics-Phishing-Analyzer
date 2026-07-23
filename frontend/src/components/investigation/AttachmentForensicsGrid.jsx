@@ -6,7 +6,7 @@ function AttachmentForensicsGrid({ attachments, embeddedImages }) {
 
   if (allFiles.length === 0) {
     return (
-      <div className="p-4 bg-[#0B0F0D] border border-emerald-900/30 rounded-xl text-center text-xs text-slate-400 font-mono">
+      <div className="p-4 bg-soc-bg border border-emerald-900/30 rounded-xl text-center text-xs text-slate-400 font-mono">
         No attachments or embedded binary payloads found.
       </div>
     );
@@ -34,14 +34,14 @@ function AttachmentForensicsGrid({ attachments, embeddedImages }) {
             const hasIssues = f.findings && f.findings.length > 0;
 
             return (
-              <tr key={idx} className="hover:bg-[#0B0F0D]">
+              <tr key={idx} className="hover:bg-soc-bg">
                 <td className="py-3 px-3 font-bold text-slate-200 flex items-center gap-2">
                   <Paperclip className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span className="truncate max-w-xs">{f.filename}</span>
                 </td>
                 <td className="py-3 px-3 text-slate-400">.{f.declared_extension}</td>
                 <td className="py-3 px-3">
-                  <span className="px-2 py-0.5 bg-[#0B0F0D] border border-emerald-900/60 text-slate-200 rounded text-[11px]">
+                  <span className="px-2 py-0.5 bg-soc-bg border border-emerald-900/60 text-slate-200 rounded text-[11px]">
                     {f.true_type}
                   </span>
                 </td>

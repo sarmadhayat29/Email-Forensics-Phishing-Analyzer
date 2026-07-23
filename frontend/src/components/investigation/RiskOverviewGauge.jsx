@@ -17,7 +17,7 @@ function RiskOverviewGauge({ score }) {
   const bucket = getBucket(score);
 
   return (
-    <div className="flex flex-col md:flex-row items-center justify-between gap-6 p-4 bg-[#0B0F0D] border border-emerald-900/40 rounded-xl">
+    <div className="flex flex-col md:flex-row items-center justify-between gap-6 p-4 bg-soc-bg border border-emerald-900/40 rounded-xl">
       <div className="relative w-40 h-40 flex items-center justify-center shrink-0">
         <svg className="w-full h-full transform -rotate-90" viewBox="0 0 160 160">
           <circle cx="80" cy="80" r={radius} stroke="#16221c" strokeWidth="12" fill="transparent" />

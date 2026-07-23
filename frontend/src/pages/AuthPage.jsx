@@ -1,11 +1,14 @@
 import React, { useState } from 'react';
 import { Shield, Mail, Lock, ArrowRight, Loader2 } from 'lucide-react';
 import { login, signup } from '../services/api';
+import { useAuth } from '../hooks/useAuth';
 
-export default function AuthPage({ onAuthSuccess }) {
+export default function AuthPage() {
+  const { loginUser } = useAuth();
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState(null);
   const [loading, setLoading] = useState(false);
 
@@ -16,8 +19,7 @@ export default function AuthPage({ onAuthSuccess }) {
 
     try {
       const data = isLogin ? await login(email, password) : await signup(email, password);
-      localStorage.setItem('token', data.access_token);
-      onAuthSuccess(data.user);
+      loginUser(data.access_token, data.user);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -26,7 +28,7 @@ export default function AuthPage({ onAuthSuccess }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#060907] flex flex-col items-center justify-center p-4 selection:bg-emerald-500/30">
+    <div className="min-h-screen bg-soc-black flex flex-col items-center justify-center p-4 selection:bg-emerald-500/30">
       
       <div className="w-full max-w-md space-y-8">
         
@@ -44,7 +46,7 @@ export default function AuthPage({ onAuthSuccess }) {
         </div>
 
         {/* Form Card */}
-        <div className="bg-[#0B0F0D] border border-emerald-900/40 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
+        <div className="bg-soc-bg border border-emerald-900/40 rounded-3xl p-8 shadow-2xl relative overflow-hidden">
           
           {/* Subtle background glow */}
           <div className="absolute -top-24 -right-24 w-48 h-48 bg-emerald-500/10 rounded-full blur-3xl" />
@@ -68,7 +70,7 @@ export default function AuthPage({ onAuthSuccess }) {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="w-full bg-[#121814] border border-emerald-900/30 rounded-xl py-3 pl-11 pr-4 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+                    className="w-full bg-soc-card border border-emerald-900/30 rounded-xl py-3 pl-11 pr-4 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
                     placeholder="analyst@soc.local"
                   />
                 </div>
@@ -79,13 +81,20 @@ export default function AuthPage({ onAuthSuccess }) {
                 <div className="relative">
                   <Lock className="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
                   <input 
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-[#121814] border border-emerald-900/30 rounded-xl py-3 pl-11 pr-4 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
+                    className="w-full bg-soc-card border border-emerald-900/30 rounded-xl py-3 pl-11 pr-12 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition"
                     placeholder="••••••••"
                   />
+                  <button 
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-emerald-400 transition"
+                  >
+                    <span className="text-[10px] font-bold uppercase">{showPassword ? 'Hide' : 'Show'}</span>
+                  </button>
                 </div>
               </div>
             </div>

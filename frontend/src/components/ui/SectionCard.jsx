@@ -5,10 +5,10 @@ function SectionCard({ title, icon: Icon, defaultOpen = true, children, badgeCou
   const [isOpen, setIsOpen] = useState(defaultOpen);
 
   return (
-    <div className="bg-[#121814] border border-emerald-900/30 rounded-2xl shadow-xl overflow-hidden transition">
+    <div className="bg-soc-card border border-emerald-900/30 rounded-2xl shadow-xl overflow-hidden transition">
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-6 py-4 bg-[#121814] hover:bg-[#16221c] flex items-center justify-between transition border-b border-emerald-900/30 text-left"
+        className="w-full px-6 py-4 bg-soc-card hover:bg-soc-hover flex items-center justify-between transition border-b border-emerald-900/30 text-left"
       >
         <div className="flex items-center gap-3">
           <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400">

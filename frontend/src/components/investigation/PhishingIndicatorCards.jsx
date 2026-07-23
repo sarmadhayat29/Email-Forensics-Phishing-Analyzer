@@ -4,7 +4,7 @@ import { CheckCircle2 } from 'lucide-react';
 function PhishingIndicatorCards({ signals }) {
   if (!signals || signals.length === 0) {
     return (
-      <div className="p-4 bg-[#0B0F0D] border border-emerald-900/30 rounded-xl text-center text-xs text-slate-400 font-mono">
+      <div className="p-4 bg-soc-bg border border-emerald-900/30 rounded-xl text-center text-xs text-slate-400 font-mono">
         <CheckCircle2 className="w-6 h-6 mx-auto text-emerald-400 mb-1" />
         No phishing indicators triggered.
       </div>
@@ -20,7 +20,7 @@ function PhishingIndicatorCards({ signals }) {
         const explanation = sig.explanation || sig.detail || '';
 
         return (
-          <div key={idx} className="p-4 bg-[#0B0F0D] border border-emerald-900/40 rounded-xl space-y-2">
+          <div key={idx} className="p-4 bg-soc-bg border border-emerald-900/40 rounded-xl space-y-2">
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-100">{title}</span>
               <span className="px-2.5 py-0.5 bg-red-950 text-red-300 border border-red-800 text-[11px] font-bold rounded">

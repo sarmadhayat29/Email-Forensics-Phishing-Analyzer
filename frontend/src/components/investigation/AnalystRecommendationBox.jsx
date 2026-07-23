@@ -5,7 +5,7 @@ function AnalystRecommendationBox({ finding }) {
   const isMalicious = finding.risk_level === 'High' || finding.risk_level === 'Critical';
 
   return (
-    <div className="p-5 bg-[#0B0F0D] border-2 border-emerald-500/40 rounded-xl space-y-3 font-mono text-xs">
+    <div className="p-5 bg-soc-bg border-2 border-emerald-500/40 rounded-xl space-y-3 font-mono text-xs">
       <div className="flex items-center gap-2">
         <Zap className="w-4 h-4 text-emerald-400" />
         <span className="font-bold text-slate-100 uppercase tracking-wider">SOC Incident Response Playbook Conclusion</span>

@@ -99,12 +99,12 @@ pip install -r requirements.txt
 
 Batch analyze a directory of `.eml` and `.msg` emails:
 ```bash
-python src/main.py --input samples/ --output reports/
+python src/main.py --input tests/fixtures/ --output reports/
 ```
 
 Analyze a single file:
 ```bash
-python src/main.py --input samples/phishing_sample_1.eml --output reports/
+python src/main.py --input tests/fixtures/phishing_sample_1.eml --output reports/
 ```
 
 Output files generated in `reports/`:
@@ -149,7 +149,7 @@ streamlit run app.py
 ├── app.py                      # Streamlit Web GUI Dashboard
 ├── README.md                   # Comprehensive System Documentation
 ├── requirements.txt            # Python dependencies (extract-msg, streamlit, pandas)
-├── samples/                    # Sample .eml and .msg email files
+├── tests/fixtures/                    # Sample .eml and .msg email files
 │   ├── legit_sample_1.eml
 │   ├── phishing_sample_1.eml
 │   └── phishing_sample_2.eml

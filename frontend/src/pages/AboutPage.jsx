@@ -3,7 +3,7 @@ import React from 'react';
 export default function AboutPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      <div className="p-6 bg-[#121814] border border-emerald-900/30 rounded-2xl">
+      <div className="p-6 bg-soc-card border border-emerald-900/30 rounded-2xl">
         <h3 className="font-bold text-slate-100 text-sm uppercase tracking-wider mb-2 text-cyan-400">About Email Forensics Platform</h3>
         <p className="text-xs text-slate-300 leading-relaxed mb-4">
           Built using clean architecture and SOLID principles. Operates 100% offline with zero external API dependencies.
