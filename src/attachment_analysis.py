@@ -69,8 +69,8 @@ def _analyze_single_attachment(att: Attachment) -> Attachment:
         is_macro = True
         findings.append(f"Macro-Enabled Office Document (extension: '.{ext}')")
     elif ext in {"doc", "xls", "ppt"} or att.true_type in {"ole/doc-xls-ppt", "zip/office"}:
-        # Note: In real payloads, we inspect binary payload for VBA signatures
-        if "doc" in ext or "xls" in ext:
+        # Exact match against legacy Office extensions only — avoids .docx/.xlsx false positives
+        if ext in {"doc", "xls"}:
             is_macro = True
             findings.append(f"Legacy Office Container with Potential Macros (extension: '.{ext}')")
 
@@ -125,7 +125,10 @@ def _infer_mime_from_true_type(true_type: str) -> str:
 
 
 def _is_zip_encrypted(filename: str) -> bool:
-    # Heuristic based on filename suffix / mock indicator
-    if "encrypted" in filename.lower() or "protected" in filename.lower() or "pass" in filename.lower():
+    """Detect password-protected ZIPs via exact keyword matching (not substring)."""
+    import re
+    fn_lower = filename.lower()
+    # Use word-boundary matching to avoid false positives like 'passport.zip'
+    if re.search(r'\bencrypted\b|\bprotected\b|\bpassword\b', fn_lower):
         return True
     return False

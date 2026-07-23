@@ -8,6 +8,7 @@ import email
 from email import policy
 import os
 from email.message import Message
+from email.parser import HeaderParser
 
 from exceptions import IngestionError, MalformedEmailError
 from logger import get_logger
@@ -48,7 +49,6 @@ def load_msg(path: str) -> Message:
         
         # 1. Map headers natively if available, otherwise reconstruct them
         if getattr(msg, "header", None):
-            from email.parser import HeaderParser
             hp = HeaderParser(policy=policy.default)
             parsed_headers = hp.parsestr(str(msg.header))
             for k, v in parsed_headers.items():
@@ -74,7 +74,11 @@ def load_msg(path: str) -> Message:
 
         # 3. Reconstruct Attachments & Embedded Images
         for att in msg.attachments:
-            filename = getattr(att, "longFilename", getattr(att, "shortFilename", "unnamed"))
+            filename = (
+                getattr(att, "longFilename", None)
+                or getattr(att, "shortFilename", None)
+                or "unnamed"
+            )
             data = getattr(att, "data", b"")
             eml.add_attachment(data, maintype="application", subtype="octet-stream", filename=filename)
             

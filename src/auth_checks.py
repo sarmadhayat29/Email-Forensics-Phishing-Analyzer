@@ -103,7 +103,7 @@ def _detect_inconsistencies(
 
     # 2. SPF Pass but DMARC Fail (SPF Alignment Failure)
     if spf == "pass" and dmarc == "fail":
-        mailfrom_domain = extract_domain(mailfrom) if mailfrom else None
+        mailfrom_domain = extract_domain(mailfrom) if mailfrom and "@" in mailfrom else (mailfrom.lower() if mailfrom else None)
         if mailfrom_domain and from_domain and mailfrom_domain != from_domain:
             inconsistencies.append(
                 f"SPF Alignment Failure: Envelope MAIL FROM domain '{mailfrom_domain}' "
@@ -114,7 +114,7 @@ def _detect_inconsistencies(
 
     # 3. DKIM Pass but Domain Misalignment
     if dkim == "pass" and from_domain:
-        header_i_domain = extract_domain(header_i) if header_i else None
+        header_i_domain = extract_domain(header_i) if header_i and "@" in header_i else (header_i.lower() if header_i else None)
         if header_i_domain and header_i_domain != from_domain:
             inconsistencies.append(
                 f"DKIM Alignment Warning: DKIM signature passed for domain '{header_i_domain}', "

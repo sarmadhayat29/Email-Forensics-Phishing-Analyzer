@@ -9,9 +9,9 @@ from typing import Optional, List
 from models import ParsedMessage, AuthVerdict, RoutingVerdict, PhishingSignal, ScoringVerdict, HeaderAnalysisVerdict, URLAnalysisVerdict
 from utils import (
     extract_domain, extract_address, extract_display_name,
-    looks_like_lookalike, url_is_risky, is_punycode_or_unicode,
+    looks_like_lookalike, is_punycode_or_unicode,
     detect_redirect_param, has_double_extension, RISKY_EXTENSIONS,
-    KNOWN_BRAND_DOMAINS, IP_HOST_RE, SHORTENER_DOMAINS
+    KNOWN_BRAND_DOMAINS
 )
 from logger import get_logger
 
@@ -58,11 +58,12 @@ RISK_BUCKETS = [
 ]
 
 
-URL_RE = re.compile(r'href=["\']([^"\']+)["\']', re.IGNORECASE)
-LINK_TEXT_RE = re.compile(r'href=["\']([^"\']+)["\'][^>]*>([^<]+)<', re.IGNORECASE)
+
 
 
 def _bucket(score: int) -> str:
+    if score < 0:
+        return "Low"
     for low, high, label in RISK_BUCKETS:
         if low <= score <= high:
             return label
@@ -115,6 +116,13 @@ def score_message(
                     weight=20,
                     explanation="Link targets a domain with high-risk TLD, Punycode, or lookalike patterns.",
                     evidence=f"Domain: '{u.domain}'"
+                ))
+            if detect_redirect_param(u.raw_url) and not any(sig.indicator == "Multiple / Open Redirect Link Parameter" for sig in signals):
+                signals.append(PhishingSignal(
+                    indicator="Multiple / Open Redirect Link Parameter",
+                    weight=20,
+                    explanation="Link contains embedded redirect query parameters pointing to a secondary destination.",
+                    evidence=f"Link URL: '{u.raw_url}'"
                 ))
 
 
@@ -186,51 +194,7 @@ def score_message(
             evidence=f"From Domain: '{from_domain}' | Mismatches: {', '.join(mismatches)}"
         ))
 
-    # 7. IP-Based URLs, 8. URL Shorteners, 9. Multiple Redirects
-    html_body = parsed.body_html or ""
-    links = [href for href, _ in LINK_TEXT_RE.findall(html_body)] or URL_RE.findall(html_body)
 
-    from urllib.parse import urlparse
-
-    for link in links:
-        try:
-            host = (urlparse(link).hostname or "").lower()
-        except Exception:
-            host = ""
-        if IP_HOST_RE.match(host):
-            signals.append(PhishingSignal(
-                indicator="IP-Based Link Target",
-                weight=25,
-                explanation="Link target uses a raw IP address instead of a domain name.",
-                evidence=f"Link URL: '{link}'"
-            ))
-            break
-
-    for link in links:
-        try:
-            host = (urlparse(link).hostname or "").lower()
-        except Exception:
-            host = ""
-        if host in SHORTENER_DOMAINS:
-            signals.append(PhishingSignal(
-                indicator="URL Shortener Link",
-                weight=15,
-                explanation="Link uses a URL shortener service to conceal destination URL.",
-                evidence=f"Shortener URL: '{link}'"
-            ))
-            break
-
-
-    for link in links:
-        redirect_res = detect_redirect_param(link)
-        if redirect_res:
-            signals.append(PhishingSignal(
-                indicator="Multiple / Open Redirect Link Parameter",
-                weight=20,
-                explanation="Link contains embedded redirect query parameters pointing to a secondary destination.",
-                evidence=f"Link URL: '{link}'"
-            ))
-            break
 
     # 10. Suspicious Keywords in Subject / Body
     suspicious_kw = ["confidential", "security alert", "suspicious activity", "action required", "account notice"]

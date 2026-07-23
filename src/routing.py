@@ -115,6 +115,9 @@ def analyse_routing(parsed: ParsedMessage) -> RoutingVerdict:
         
         # 1. Invalid or Future Timestamps
         if dt is not None:
+            # Guard: localize naive datetimes to UTC before comparison
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
             if dt > now_utc and (dt - now_utc).total_seconds() > 300:
                 msg = f"Hop #{h.hop_number} has a future timestamp ({h.timestamp}) — clock skew or forged header."
                 flags.append(msg)

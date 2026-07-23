@@ -51,8 +51,12 @@ TARGET_BRANDS = [
     "outlook", "bankofamerica", "chase", "wellsfargo", "citibank",
     "dhl", "fedex", "ups", "usps", "coinbase", "binance",
     "quickbooks", "xero", "dropbox", "adobe", "stripe", "square",
-    "barclays", "hsbc", "schwab", "fidelity", "verizon", "att"
+    "barclays", "hsbc", "schwab", "fidelity", "verizon", "attcom",
 ]
+
+# Brands requiring whole-word matching to prevent substring false positives
+# e.g. "att" matches "Attention", "Attachment" — use "attcom" to represent AT&T
+BRAND_WORD_BOUNDARY_REQUIRED = {"attcom"}
 
 KNOWN_BRAND_DOMAINS = [f"{b}.com" for b in TARGET_BRANDS]
 
