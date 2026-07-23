@@ -1,8 +1,29 @@
-# All optional. The tool runs on the standard library alone and degrades
-# gracefully (with a note in the report) if these are not installed.
+# ============================================================
+# Email Forensics & Phishing Analyzer — Python Dependencies
+# All versions are pinned for reproducible builds.
+# ============================================================
 
-dnspython>=2.6.0      # live DNS lookups for SPF/DKIM/DMARC re-verification
-dkimpy>=1.1.0          # DKIM signature verification
-checkdmarc>=5.4.0      # DMARC policy evaluation
-python-whois>=0.9.4    # domain-age lookup for newly-registered-domain signal
-extract-msg>=0.45.0    # Outlook .msg file parsing
+# --- Web Framework & API -------------------------------------------------
+fastapi==0.139.2
+uvicorn==0.49.0
+python-multipart==0.0.32
+
+# --- Database & ORM ------------------------------------------------------
+sqlalchemy==2.0.51
+psycopg2-binary==2.9.12
+
+# --- Authentication -------------------------------------------------------
+pyjwt==2.13.0
+bcrypt==5.0.0
+passlib==1.7.4
+
+# --- Report Generation ---------------------------------------------------
+reportlab==5.0.0
+
+# --- Forensic Engine — Optional (graceful degradation if absent) ---------
+# Install these for full DNS/DKIM/DMARC live verification support.
+dnspython>=2.6.0           # live DNS lookups for SPF/DKIM/DMARC re-verification
+dkimpy>=1.1.0              # DKIM signature verification
+checkdmarc>=5.4.0          # DMARC policy evaluation
+python-whois>=0.9.4        # domain-age lookup for newly-registered-domain signal
+extract-msg>=0.45.0        # Outlook .msg file parsing
