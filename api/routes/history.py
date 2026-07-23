@@ -1,12 +1,13 @@
 import os
 import json
 import shutil
+from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 
-from api.config import UPLOAD_DIR, REPORTS_DIR
-from db import get_db, User, AnalysisRecord
-from auth import require_current_user
+from config import UPLOAD_DIR, REPORTS_DIR
+from db import AnalysisRecord, User
+from api.dependencies import get_db, require_current_user
 
 router = APIRouter()
 
@@ -15,9 +16,14 @@ def list_analyses(
     search: str = None,
     sort: str = "date_desc",
     risk_level: str = "All",
+    limit: int = 50,
+    offset: int = 0,
     current_user: User = Depends(require_current_user),
     db: Session = Depends(get_db)
 ):
+    # Clamp limit to a safe maximum to prevent memory exhaustion
+    limit = min(max(1, limit), 100)
+
     user_id = current_user.id
     query = db.query(AnalysisRecord).filter(AnalysisRecord.user_id == user_id)
 
@@ -29,9 +35,12 @@ def list_analyses(
 
     if search:
         search_fmt = f"%{search.strip().lower()}%"
-        # We can only search by filename in the DB now since subject/from_addr are in JSON
-        # For a production app we'd use a JSONB query, but for compatibility we'll use filename
-        query = query.filter(AnalysisRecord.filename.ilike(search_fmt))
+        # Using native JSONB query
+        query = query.filter(
+            (AnalysisRecord.filename.ilike(search_fmt)) |
+            (AnalysisRecord.finding_json['subject'].astext.ilike(search_fmt)) |
+            (AnalysisRecord.finding_json['from_addr'].astext.ilike(search_fmt))
+        )
 
     if sort == "date_asc":
         query = query.order_by(AnalysisRecord.created_at.asc())
@@ -44,10 +53,11 @@ def list_analyses(
     else:
         query = query.order_by(AnalysisRecord.created_at.desc())
 
-    records = query.all()
+    total = query.count()
+    records = query.offset(offset).limit(limit).all()
     results = []
     for r in records:
-        finding_data = json.loads(r.finding_json)
+        finding_data = r.finding_json
         results.append({
             "id": r.id,
             "filename": r.filename,
@@ -59,7 +69,7 @@ def list_analyses(
             "created_at": r.created_at.isoformat()
         })
 
-    return {"count": len(results), "analyses": results}
+    return {"count": len(results), "total": total, "offset": offset, "limit": limit, "analyses": results}
 
 @router.get("/{id}")
 def get_analysis_record(
@@ -71,7 +81,7 @@ def get_analysis_record(
     if not record:
         raise HTTPException(status_code=404, detail="Analysis record not found.")
 
-    finding_data = json.loads(record.finding_json)
+    finding_data = record.finding_json
     return {"file_id": record.id, "finding": finding_data}
 
 @router.delete("/{id}")
@@ -85,14 +95,18 @@ def delete_analysis_record(
     if not record:
         raise HTTPException(status_code=404, detail="Analysis record not found or unauthorized.")
 
-    db.delete(record)
-    db.commit()
-
     file_dir = os.path.join(UPLOAD_DIR, id)
     report_dir = os.path.join(REPORTS_DIR, id)
-    if os.path.exists(file_dir):
-        shutil.rmtree(file_dir, ignore_errors=True)
-    if os.path.exists(report_dir):
-        shutil.rmtree(report_dir, ignore_errors=True)
+    
+    try:
+        if os.path.exists(file_dir):
+            shutil.rmtree(file_dir)
+        if os.path.exists(report_dir):
+            shutil.rmtree(report_dir)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete analysis files from disk: {str(e)}")
+
+    db.delete(record)
+    db.commit()
 
     return {"status": "deleted", "id": id}

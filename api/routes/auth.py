@@ -3,12 +3,12 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 
-from db import get_db, User
-from auth import (
-    hash_password, verify_password, create_access_token,
-    get_current_user
-)
+from db import User
+from auth import hash_password, verify_password
+from api.dependencies import create_access_token, get_current_user, get_db
+from api.utils import format_iso
 from logger import get_logger
+from api.security import login_limiter
 
 logger = get_logger(__name__)
 router = APIRouter()
@@ -16,14 +16,6 @@ router = APIRouter()
 class AuthRequest(BaseModel):
     email: str
     password: str
-
-def format_iso(dt):
-    if dt is None:
-        from datetime import datetime, timezone
-        return datetime.now(timezone.utc).isoformat()
-    if hasattr(dt, 'isoformat'):
-        return dt.isoformat()
-    return str(dt)
 
 @router.post("/signup")
 def signup(req: AuthRequest, db: Session = Depends(get_db)):
@@ -62,8 +54,6 @@ def signup(req: AuthRequest, db: Session = Depends(get_db)):
         logger.error(f"Signup error: {e}")
         raise HTTPException(status_code=500, detail="Registration failed due to an internal server error.")
 
-from api.security import login_limiter
-
 @router.post("/login", dependencies=[Depends(login_limiter)])
 def login(req: AuthRequest, db: Session = Depends(get_db)):
     try:
@@ -101,3 +91,4 @@ def get_me(user: Optional[User] = Depends(get_current_user)):
             "created_at": format_iso(user.created_at)
         }
     }
+

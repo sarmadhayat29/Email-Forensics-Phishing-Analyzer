@@ -4,9 +4,9 @@ from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from api.config import REPORTS_DIR
-from db import get_db, AnalysisRecord, User
-from auth import require_current_user
+from config import REPORTS_DIR
+from db import AnalysisRecord, User
+from api.dependencies import get_db, require_current_user
 
 router = APIRouter()
 
@@ -22,19 +22,8 @@ def get_report(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_current_user)
 ):
-    verify_ownership(file_id, db, current_user)
-    
-    json_path = os.path.join(REPORTS_DIR, file_id, "report.json")
-    if not os.path.exists(json_path):
-        record = db.query(AnalysisRecord).filter(AnalysisRecord.id == file_id).first()
-        if record:
-            return {"file_id": file_id, "finding": json.loads(record.finding_json)}
-        raise HTTPException(status_code=404, detail="Report data not found.")
-
-    with open(json_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    return {"file_id": file_id, "finding": data}
+    record = verify_ownership(file_id, db, current_user)
+    return {"file_id": file_id, "finding": record.finding_json}
 
 @router.get("/{file_id}/download/html")
 def download_html_report(
