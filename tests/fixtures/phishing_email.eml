@@ -1,0 +1,26 @@
+Delivered-To: victim@company.com
+Return-Path: <attacker@compromised-server.net>
+Authentication-Results: mx.google.com;
+       spf=fail (google.com: domain of attacker@compromised-server.net does not designate 10.0.0.5 as permitted sender) smtp.mailfrom=attacker@compromised-server.net;
+       dmarc=fail (p=REJECT sp=REJECT dis=NONE) header.from=paypa1.com
+Received: from compromised-server.net (compromised-server.net. [10.0.0.5])
+        by mx.google.com with ESMTPS id badguy666
+        for <victim@company.com>
+        (version=TLS1_2 cipher=ECDHE-RSA-AES128-GCM-SHA256 bits=128/128);
+        Mon, 10 Jul 2026 14:00:00 -0700 (PDT)
+From: "PayPal Security" <security@paypa1.com>
+Reply-To: support@paypa1-update.com
+To: victim@company.com
+Subject: URGENT: Verify your account within 24 hours
+Date: Mon, 10 Jul 2026 14:00:00 -0700
+Message-ID: <987654321@compromised-server.net>
+Content-Type: text/html; charset="UTF-8"
+
+<html>
+<body>
+<p>Dear Customer,</p>
+<p>We detected unusual activity on your account. You must <b>verify your account</b> within 24 hours or it will be permanently suspended.</p>
+<p>Please click the secure link below to login:</p>
+<p><a href="http://www.paypa1-update.com/login?token=abc">Secure Login</a></p>
+</body>
+</html>

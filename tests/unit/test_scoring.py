@@ -6,6 +6,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 from scoring import score_message
 from models import ParsedMessage, AuthVerdict, RoutingVerdict
+from url_analysis import analyze_urls
 
 
 class TestScoring(unittest.TestCase):
@@ -46,14 +47,17 @@ class TestScoring(unittest.TestCase):
         self.assertIn("Urgent Pressure Tactics", indicators)
 
     def test_ip_based_url_and_open_redirect(self):
+        body_html = '<a href="http://192.168.1.1/login?redirect=https://evil.com">Click Here</a>'
         parsed = ParsedMessage(
             from_raw="support@company.com",
-            body_html='<a href="http://192.168.1.1/login?redirect=https://evil.com">Click Here</a>'
+            body_html=body_html
         )
         auth = AuthVerdict(raw="", source="", spf="pass", dkim="pass", dmarc="pass")
         routing = RoutingVerdict(hop_count=2)
 
-        verdict = score_message(parsed, auth, routing)
+        # Extract URL verdict so URL-based signals are evaluated in scoring
+        url_verdict = analyze_urls(parsed)
+        verdict = score_message(parsed, auth, routing, url_verdict=url_verdict)
         indicators = [s.indicator for s in verdict.signals]
         self.assertIn("IP-Based Link Target", indicators)
         self.assertIn("Multiple / Open Redirect Link Parameter", indicators)

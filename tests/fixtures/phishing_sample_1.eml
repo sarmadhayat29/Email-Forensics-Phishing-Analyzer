@@ -1,0 +1,40 @@
+Delivered-To: victim@example.com
+Received: from unknown-relay.ru ([185.220.101.7])
+	by mx.example.com with SMTP id abc123
+	for <victim@example.com>; Wed, 15 Jul 2026 09:41:12 +0000
+Received: from mail.paypa1-secure.com ([203.0.113.44])
+	by unknown-relay.ru with ESMTP id def456
+	for <victim@example.com>; Wed, 15 Jul 2026 09:40:02 +0000
+Authentication-Results: mx.example.com; spf=fail smtp.mailfrom=paypa1-secure.com;
+ dkim=fail header.d=paypa1-secure.com; dmarc=fail header.from=paypa1-secure.com
+From: "PayPal Security" <no-reply@paypa1-secure.com>
+Reply-To: security-support@totally-not-paypal.info
+To: victim@example.com
+Subject: Urgent: Your account has been limited
+Message-ID: <20260715094012.ABC123@paypa1-secure.com>
+Date: Wed, 15 Jul 2026 09:40:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="BOUNDARY123"
+
+--BOUNDARY123
+Content-Type: text/html; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+<html><body>
+<p>Dear Customer,</p>
+<p>We have detected unusual activity on your PayPal account. Your account
+has been temporarily limited. Please verify your identity immediately to
+avoid permanent suspension.</p>
+<p><a href="http://185.220.101.7/verify-account/login.php">Click here to verify your account</a></p>
+<p>Failure to verify within 24 hours will result in permanent account closure.</p>
+<p>PayPal Security Team</p>
+</body></html>
+
+--BOUNDARY123
+Content-Type: application/octet-stream; name="Account_Statement.pdf.exe"
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="Account_Statement.pdf.exe"
+
+TVqQAAMAAAAEAAAA//8AALgAAAAAAAAAQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
+--BOUNDARY123--

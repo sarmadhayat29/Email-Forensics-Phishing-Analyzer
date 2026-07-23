@@ -11,7 +11,7 @@ from main import AnalyzerPipeline
 class TestAnalyzerPipeline(unittest.TestCase):
     def setUp(self):
         self.output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../test_reports'))
-        self.input_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../samples'))
+        self.input_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../tests/fixtures'))
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
 
