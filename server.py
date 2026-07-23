@@ -14,30 +14,42 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src'
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from contextlib import asynccontextmanager
 
 from api.routes import auth, analysis, history, reports
+from api.exceptions import register_exception_handlers
+from config import ALLOWED_ORIGINS
+from db import init_db
 from logger import get_logger
 
 logger = get_logger(__name__)
 
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Initialize database schema on startup."""
+    logger.info("Initializing database schema...")
+    init_db()
+    logger.info("Database schema ready.")
+    yield
+
 app = FastAPI(
     title="Email Forensics & Phishing Analyzer API",
     description="REST API for email forensic investigation, user authentication, and persistent analysis history.",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan,
 )
-
-# Parse ALLOWED_ORIGINS from environment, default to strict localhost for dev
-allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:8000,http://localhost:8000")
-allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
 
 # Enable CORS for web frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Register global exception handlers
+register_exception_handlers(app)
 
 @app.get("/api/health")
 def health_check():
@@ -53,7 +65,6 @@ app.include_router(reports.router, prefix="/api/report", tags=["reports"])
 dist_dir = os.path.join(os.path.dirname(__file__), "frontend", "dist")
 if os.path.exists(dist_dir):
     app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
-
 
 if __name__ == "__main__":
     import uvicorn

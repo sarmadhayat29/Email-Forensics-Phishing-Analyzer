@@ -3,23 +3,21 @@
 Supports SQLAlchemy ORM mapped to Supabase PostgreSQL.
 """
 
-import os
-import sys
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, ForeignKey
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, ForeignKey, Index
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy.dialects.postgresql import JSONB
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-if not DATABASE_URL:
-    print("FATAL: DATABASE_URL environment variable is not set.", file=sys.stderr)
-    sys.exit(1)
+from config import DATABASE_URL
 
-# Ensure the postgresql scheme is used for psycopg2 (Supabase might provide postgres:// instead of postgresql://)
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
-
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=300,
+    pool_size=10,
+    max_overflow=20,
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
@@ -39,30 +37,23 @@ class AnalysisRecord(Base):
     __tablename__ = "analysis_records"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     filename = Column(String(255), nullable=False)
-    risk_score = Column(Integer, nullable=False, default=0)
-    verdict = Column(String(50), nullable=False, default="Low")
+    risk_score = Column(Integer, nullable=False, default=0, index=True)
+    verdict = Column(String(50), nullable=False, default="Low", index=True)
     report_path = Column(String(500), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
     
-    # Keeping finding_json to preserve original API behavior without breaking
-    finding_json = Column(Text, nullable=False)
+    finding_json = Column(JSONB, nullable=False)
 
     owner = relationship("User", back_populates="analyses")
+
+    # Composite index for the primary history query pattern
+    __table_args__ = (
+        Index("idx_user_created", "user_id", "created_at"),
+    )
 
 
 def init_db():
     Base.metadata.create_all(bind=engine)
 
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-# Initialize database schema immediately on import
-init_db()
