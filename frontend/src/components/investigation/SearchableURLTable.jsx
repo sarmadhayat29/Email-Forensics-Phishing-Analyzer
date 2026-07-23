@@ -1,12 +1,31 @@
 import React, { useState } from 'react';
-import { Search, CheckCircle2, AlertTriangle, Link as LinkIcon } from 'lucide-react';
+import { Search, CheckCircle2, AlertTriangle, Copy, Check } from 'lucide-react';
+
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async (e) => {
+    e.stopPropagation();
+    await navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <button onClick={handleCopy} className="ml-1 text-slate-500 hover:text-emerald-400 transition" title="Copy raw URL">
+      {copied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+    </button>
+  );
+}
+
+function defang(url) {
+  return url.replace(/^https?:\/\//i, (m) => m.replace('://', '[://]').replace('http', 'hxxp'));
+}
 
 function SearchableURLTable({ urlAnalysis }) {
   const [searchQuery, setSearchQuery] = useState('');
 
   if (!urlAnalysis || !urlAnalysis.urls || urlAnalysis.urls.length === 0) {
     return (
-      <div className="p-4 bg-[#0B0F0D] border border-emerald-900/30 rounded-xl text-center text-xs text-slate-400 font-mono">
+      <div className="p-4 bg-soc-bg border border-emerald-900/30 rounded-xl text-center text-xs text-slate-400 font-mono">
         No URLs extracted from message HTML or text body.
       </div>
     );
@@ -25,7 +44,7 @@ function SearchableURLTable({ urlAnalysis }) {
         <input
           type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
           placeholder="Filter URLs by host domain, target URL, or anchor text..."
-          className="w-full bg-[#0B0F0D] border border-emerald-900/40 rounded-xl pl-9 pr-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+          className="w-full bg-soc-bg border border-emerald-900/40 rounded-xl pl-9 pr-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
         />
       </div>
 
@@ -44,12 +63,15 @@ function SearchableURLTable({ urlAnalysis }) {
               const hasFindings = u.findings && u.findings.length > 0;
 
               return (
-                <tr key={idx} className="hover:bg-[#0B0F0D]">
+                <tr key={idx} className="hover:bg-soc-bg">
                   <td className="py-3 px-3 text-cyan-400 truncate max-w-md">
-                    <a href={u.normalized_url} target="_blank" rel="noreferrer" className="hover:underline flex items-center gap-1">
-                      <LinkIcon className="w-3.5 h-3.5 shrink-0" />
-                      <span className="truncate">{u.normalized_url}</span>
-                    </a>
+                    {/* Defanged: no live link — prevents accidental click on malicious URLs */}
+                    <span className="flex items-center gap-1">
+                      <code className="truncate text-xs text-cyan-300 bg-soc-bg px-1 py-0.5 rounded">
+                        {defang(u.normalized_url)}
+                      </code>
+                      <CopyButton text={u.normalized_url} />
+                    </span>
                   </td>
                   <td className="py-3 px-3 text-slate-200 font-bold">{u.domain}</td>
                   <td className="py-3 px-3 text-slate-400">{u.anchor_text || '(None)'}</td>
