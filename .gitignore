@@ -12,3 +12,4 @@ test-samples/temp.eml
 test_reports/
 reports/
 scratch/
+.agents/
