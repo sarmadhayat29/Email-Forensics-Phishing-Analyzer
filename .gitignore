@@ -9,3 +9,6 @@ server_reports/
 frontend/node_modules/
 frontend/dist/
 test-samples/temp.eml
+test_reports/
+reports/
+scratch/
