@@ -77,7 +77,7 @@ export default function Dashboard() {
                 <div className="pt-3 border-t border-emerald-950 flex items-center justify-between text-xs font-mono">
                   <div>
                     <span className="text-slate-500 block text-[10px]">Score</span>
-                    <span className="font-extrabold text-amber-400">{item.score} / 1000</span>
+                    <span className="font-extrabold text-amber-400">{item.score} / 100</span>
                   </div>
                   <div>
                     <span className="text-slate-500 block text-[10px]">Date</span>

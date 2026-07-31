@@ -1,9 +1,18 @@
 import React from 'react';
 
 function OverallVerdictBanner({ finding }) {
-  const score = finding.score || 0;
-  const trustLevel = Math.max(0, 100 - Math.round(score / 10));
-  const confidenceScore = "95% (High Confidence)";
+  // Backend risk score is already normalised to 0-100 (see to_display_score in
+  // src/scoring.py), so trust is simply its inverse.
+  const score = Math.min(Math.max(finding.score || 0, 0), 100);
+  const trustLevel = 100 - score;
+
+  // Confidence reflects how much verifiable evidence the offline engine had.
+  // It is computed by the backend and is genuinely unknown for some messages,
+  // in which case we say so rather than asserting a number.
+  const confidenceScore =
+    finding.confidence == null
+      ? `N/A (${finding.confidence_label || 'Unknown'})`
+      : `${finding.confidence}% (${finding.confidence_label || 'Unknown'})`;
 
   const getVerdictStyle = (level) => {
     if (level === 'High' || level === 'Critical') {
@@ -35,7 +44,7 @@ function OverallVerdictBanner({ finding }) {
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4 font-mono text-xs text-center">
         <div className="p-4 bg-soc-bg border border-emerald-900/40 rounded-xl space-y-1">
           <span className="text-slate-400 text-[10px] uppercase block">Risk Score</span>
-          <span className="text-2xl font-extrabold text-amber-400">{score} / 1000</span>
+          <span className="text-2xl font-extrabold text-amber-400">{score} / 100</span>
         </div>
         <div className="p-4 bg-soc-bg border border-emerald-900/40 rounded-xl space-y-1">
           <span className="text-slate-400 text-[10px] uppercase block">Sender Trust Level</span>
@@ -43,7 +52,7 @@ function OverallVerdictBanner({ finding }) {
         </div>
         <div className="p-4 bg-soc-bg border border-emerald-900/40 rounded-xl space-y-1">
           <span className="text-slate-400 text-[10px] uppercase block">Detection Confidence</span>
-          <span className="text-sm font-bold text-cyan-300 block truncate">{confidenceScore}</span>
+          <span className="text-sm font-bold text-cyan-300 block truncate" title={confidenceScore}>{confidenceScore}</span>
         </div>
         <div className="p-4 bg-soc-bg border border-emerald-900/40 rounded-xl space-y-1">
           <span className="text-slate-400 text-[10px] uppercase block">Auth Status</span>

@@ -34,7 +34,7 @@ export default function HistoryPage() {
         </div>
 
         <div className="flex items-center gap-1.5 bg-soc-bg p-1 rounded-xl border border-emerald-900/30 text-xs font-mono font-bold">
-          {['All', 'High', 'Medium', 'Safe'].map(f => (
+          {['All', 'Critical', 'High', 'Medium', 'Safe'].map(f => (
             <button
               key={f} onClick={() => setFilter(f)}
               className={`px-3 py-1.5 rounded-lg transition ${filter === f ? 'bg-emerald-500 text-slate-950 shadow' : 'text-slate-400 hover:text-slate-200'}`}

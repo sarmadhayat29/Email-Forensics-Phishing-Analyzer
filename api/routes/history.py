@@ -8,8 +8,22 @@ from sqlalchemy.orm import Session
 from config import UPLOAD_DIR, REPORTS_DIR
 from db import AnalysisRecord, User
 from api.dependencies import get_db, require_current_user
+from scoring import to_display_score
 
 router = APIRouter()
+
+
+def _display_score(record: AnalysisRecord, finding_data: dict) -> int:
+    """Return the record's score on the 0-100 scale.
+
+    Records written before the switch to a normalised score stored the raw
+    weight total (which can exceed 100) and have no ``raw_score`` key, so they
+    are mapped through the same monotone function on read.
+    """
+    score = record.risk_score or 0
+    if "raw_score" not in (finding_data or {}) and score > 100:
+        return to_display_score(score)
+    return score
 
 @router.get("")
 def list_analyses(
@@ -63,7 +77,7 @@ def list_analyses(
             "filename": r.filename,
             "subject": finding_data.get("subject") or "(No Subject)",
             "from_addr": finding_data.get("from_addr") or "-",
-            "score": r.risk_score,
+            "score": _display_score(r, finding_data),
             "risk_level": r.verdict,
             "date": r.created_at.isoformat().split("T")[0],
             "created_at": r.created_at.isoformat()

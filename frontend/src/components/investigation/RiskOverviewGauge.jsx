@@ -1,20 +1,22 @@
 import React from 'react';
 
+// Thresholds mirror the backend risk buckets in src/scoring.py (RISK_BUCKETS):
+// Low < 30, Medium 30-69, High 70-89, Critical >= 90 on the 0-100 scale.
 function RiskOverviewGauge({ score }) {
-  const normalizedScore = Math.min(Math.max(score, 0), 1000);
-  const percentage = normalizedScore / 1000;
+  const normalizedScore = Math.min(Math.max(score || 0, 0), 100);
+  const percentage = normalizedScore / 100;
   const radius = 65;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - percentage * circumference;
 
   const getBucket = (s) => {
-    if (s >= 700) return { label: 'CRITICAL SEVERITY', color: 'text-red-500', bar: '#ef4444' };
-    if (s >= 300) return { label: 'HIGH SEVERITY', color: 'text-red-400', bar: '#ef4444' };
-    if (s >= 100) return { label: 'MEDIUM SEVERITY', color: 'text-amber-400', bar: '#f59e0b' };
+    if (s >= 90) return { label: 'CRITICAL SEVERITY', color: 'text-red-500', bar: '#ef4444' };
+    if (s >= 70) return { label: 'HIGH SEVERITY', color: 'text-red-400', bar: '#ef4444' };
+    if (s >= 30) return { label: 'MEDIUM SEVERITY', color: 'text-amber-400', bar: '#f59e0b' };
     return { label: 'LOW / SAFE', color: 'text-emerald-400', bar: '#10b981' };
   };
 
-  const bucket = getBucket(score);
+  const bucket = getBucket(normalizedScore);
 
   return (
     <div className="flex flex-col md:flex-row items-center justify-between gap-6 p-4 bg-soc-bg border border-emerald-900/40 rounded-xl">
@@ -34,7 +36,7 @@ function RiskOverviewGauge({ score }) {
           <span className={`text-3xl font-extrabold font-mono tracking-tight ${bucket.color}`}>
             {normalizedScore}
           </span>
-          <span className="text-[10px] font-mono text-slate-400 uppercase">/ 1000 PTS</span>
+          <span className="text-[10px] font-mono text-slate-400 uppercase">/ 100 PTS</span>
         </div>
       </div>
 
@@ -46,20 +48,20 @@ function RiskOverviewGauge({ score }) {
 
         <div className="space-y-2 text-[11px]">
           <div className="flex items-center justify-between">
-            <span className="text-slate-400">Critical Threat (700-1000)</span>
-            <span className={score >= 700 ? "text-red-400 font-bold" : "text-slate-600"}>{score >= 700 ? "ACTIVE" : "CLEAN"}</span>
+            <span className="text-slate-400">Critical Threat (90-100)</span>
+            <span className={normalizedScore >= 90 ? "text-red-400 font-bold" : "text-slate-600"}>{normalizedScore >= 90 ? "ACTIVE" : "CLEAN"}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-slate-400">High Threat (300-699)</span>
-            <span className={score >= 300 && score < 700 ? "text-red-400 font-bold" : "text-slate-600"}>{score >= 300 && score < 700 ? "ACTIVE" : "CLEAN"}</span>
+            <span className="text-slate-400">High Threat (70-89)</span>
+            <span className={normalizedScore >= 70 && normalizedScore < 90 ? "text-red-400 font-bold" : "text-slate-600"}>{normalizedScore >= 70 && normalizedScore < 90 ? "ACTIVE" : "CLEAN"}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-slate-400">Medium Threat (100-299)</span>
-            <span className={score >= 100 && score < 300 ? "text-amber-400 font-bold" : "text-slate-600"}>{score >= 100 && score < 300 ? "ACTIVE" : "CLEAN"}</span>
+            <span className="text-slate-400">Medium Threat (30-69)</span>
+            <span className={normalizedScore >= 30 && normalizedScore < 70 ? "text-amber-400 font-bold" : "text-slate-600"}>{normalizedScore >= 30 && normalizedScore < 70 ? "ACTIVE" : "CLEAN"}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-slate-400">Low / Safe (0-99)</span>
-            <span className={score < 100 ? "text-emerald-400 font-bold" : "text-slate-600"}>{score < 100 ? "ACTIVE" : "CLEAN"}</span>
+            <span className="text-slate-400">Low / Safe (0-29)</span>
+            <span className={normalizedScore < 30 ? "text-emerald-400 font-bold" : "text-slate-600"}>{normalizedScore < 30 ? "ACTIVE" : "CLEAN"}</span>
           </div>
         </div>
       </div>
