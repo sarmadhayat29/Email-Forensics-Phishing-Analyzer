@@ -49,5 +49,30 @@ class TestURLAnalysis(unittest.TestCase):
         self.assertTrue(any("open-redirect" in f for f in url_obj.findings))
 
 
+class TestAnchorMismatchPrecision(unittest.TestCase):
+    """Anchor text only counts as a domain claim when it plausibly is one."""
+
+    def _mismatched(self, anchor, href="http://links.company.com/track"):
+        parsed = ParsedMessage(body_html=f'<a href="{href}">{anchor}</a>')
+        return analyze_urls(parsed).urls[0].is_mismatched_anchor
+
+    def test_filenames_and_versions_are_not_domain_claims(self):
+        for anchor in ["invoice.pdf", "report.docx", "Release 2.1", "Click here",
+                       "Acme Inc.We deliver", "see page 4.2 below"]:
+            self.assertFalse(self._mismatched(anchor), anchor)
+
+    def test_real_domain_claims_still_flagged(self):
+        self.assertTrue(self._mismatched("www.paypal.com"))
+        self.assertTrue(self._mismatched("https://paypal.com/signin"))
+        self.assertTrue(self._mismatched("support@paypal.com"))
+
+    def test_same_organisation_subdomains_are_not_mismatched(self):
+        self.assertFalse(self._mismatched("company.com", "https://links.company.com/track"))
+        self.assertFalse(self._mismatched("https://www.company.com/a", "https://cdn.company.com/b"))
+
+    def test_anchor_matching_target_exactly(self):
+        self.assertFalse(self._mismatched("https://company.com/x", "https://company.com/x"))
+
+
 if __name__ == '__main__':
     unittest.main()
