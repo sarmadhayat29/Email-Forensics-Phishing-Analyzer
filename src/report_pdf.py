@@ -86,7 +86,14 @@ def write_pdf_report(finding: Finding, out_path: str) -> None:
     # 1. EXECUTIVE BANNER & OVERALL VERDICT & RISK SCORE
     story.append(Paragraph("<b>SOC EMAIL FORENSIC INVESTIGATION REPORT</b>", title_style))
     story.append(Paragraph(
-        f"Target Payload: <b>{_x(finding.file)}</b> | Score: <b>{finding.score}/1000</b> | Risk Level: <b>{_x(finding.risk_level).upper()}</b>",
+        f"Target Payload: <b>{_x(finding.file)}</b> | Score: <b>{finding.score}/100</b> | Risk Level: <b>{_x(finding.risk_level).upper()}</b>",
+        body_style
+    ))
+    _confidence = getattr(finding, "confidence", None)
+    _confidence_text = "N/A" if _confidence is None else f"{_confidence}%"
+    story.append(Paragraph(
+        f"Detection Confidence: <b>{_confidence_text}</b> ({_x(getattr(finding, 'confidence_label', 'Unknown'))}) "
+        f"| Raw Weighted Evidence Total: <b>{getattr(finding, 'raw_score', finding.score)}</b>",
         body_style
     ))
     story.append(HRFlowable(width="100%", thickness=1.5, color=colors.HexColor('#10B981'), spaceAfter=10))

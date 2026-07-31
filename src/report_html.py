@@ -152,15 +152,18 @@ def write_html_report(finding: Finding, out_path: str) -> None:
       </div>
       <div>
         <span class="badge" style="{badge_style}">{finding.risk_level} THREAT</span>
-        <span class="score-box">Risk Score: {finding.score} / 1000</span>
+        <span class="score-box">Risk Score: {finding.score} / 100</span>
       </div>
     </div>
     
     <div>
       <h2 style="font-size: 1.1rem; margin-top:0; color: #f8fafc;">Executive Summary &amp; Overall Verdict</h2>
       <p style="margin: 0.5rem 0 1.5rem 0; color: var(--text-muted); font-size: 0.9rem;">
-        Automated 100% offline forensic evaluation determined an overall verdict of <strong>{verdict_title}</strong> (Score: {finding.score}/1000).
+        Automated 100% offline forensic evaluation determined an overall verdict of <strong>{verdict_title}</strong> (Score: {finding.score}/100).
         Review the 13 core investigation sections below for technical evidence and SOC playbooks.
+      </p>
+      <p style="margin: -1rem 0 1.5rem 0; color: var(--text-muted); font-size: 0.75rem; font-family: monospace;">
+        Detection confidence: {_confidence_display(finding)} &nbsp;|&nbsp; Raw weighted evidence total: {finding.raw_score} across {len(finding.signals)} signal(s)
       </p>
       
       <!-- 4. Email Summary Grid -->
@@ -232,6 +235,15 @@ def write_html_report(finding: Finding, out_path: str) -> None:
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html)
+
+
+def _confidence_display(finding: Finding) -> str:
+    """Render detection confidence, or N/A when there was too little evidence."""
+    confidence = getattr(finding, "confidence", None)
+    label = getattr(finding, "confidence_label", "") or "Unknown"
+    if confidence is None:
+        return f"N/A ({_escape(label)})"
+    return f"{confidence}% ({_escape(label)})"
 
 
 def _render_header_forensics(header_findings: List[HeaderFinding]) -> str:

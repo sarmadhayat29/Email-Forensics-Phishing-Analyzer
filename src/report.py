@@ -53,9 +53,12 @@ def build_finding(
         mime_structure=parsed.mime_structure,
         header_findings=header_verdict.findings if header_verdict else [],
         url_analysis=url_verdict if url_verdict else URLAnalysisVerdict(),
-        score=scoring.total_score,
+        score=scoring.display_score,
         risk_level=scoring.risk_level,
         signals=scoring.signals,
+        raw_score=scoring.total_score,
+        confidence=scoring.confidence,
+        confidence_label=scoring.confidence_label,
     )
 
 
