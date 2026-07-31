@@ -125,10 +125,10 @@ def _infer_mime_from_true_type(true_type: str) -> str:
 
 
 def _is_zip_encrypted(filename: str) -> bool:
-    """Detect password-protected ZIPs via exact keyword matching (not substring)."""
+    """Detect password-protected ZIPs via keyword matching with delimiter boundaries."""
     import re
     fn_lower = filename.lower()
-    # Use word-boundary matching to avoid false positives like 'passport.zip'
-    if re.search(r'\bencrypted\b|\bprotected\b|\bpassword\b', fn_lower):
+    # Match encrypted/protected/password bounded by non-alphanumeric chars or underscores (e.g. passport.zip won't match 'pass')
+    if re.search(r'(?:^|[_\W])(?:encrypted|protected|password)(?:[_\W]|$)', fn_lower):
         return True
     return False
