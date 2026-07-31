@@ -11,14 +11,12 @@ from utils import (
     extract_domain, extract_address, extract_display_name,
     looks_like_lookalike, is_punycode_or_unicode,
     detect_redirect_param, has_double_extension, RISKY_EXTENSIONS,
-    KNOWN_BRAND_DOMAINS
+    KNOWN_BRAND_DOMAINS, build_match_text, normalize_text,
+    HIGH_RISK_TLDS,
 )
 from logger import get_logger
 
 logger = get_logger(__name__)
-
-# High-risk TLDs
-HIGH_RISK_TLDS = {"xyz", "top", "work", "buzz", "click", "country", "tk", "ml", "ga", "cf", "gq", "fit", "surf", "icu"}
 
 # Pattern matcher sets
 CREDENTIAL_PATTERNS = [
@@ -51,23 +49,257 @@ PASSWORD_RESET_PATTERNS = [
     r"\bpassword\s+change\s+request\b"
 ]
 
+# Buckets are evaluated against the 0-100 display score.
 RISK_BUCKETS = [
     (0, 29, "Low"),
     (30, 69, "Medium"),
-    (70, 10**9, "High"),
+    (70, 89, "High"),
+    (90, 10**9, "Critical"),
 ]
 
+# Anchors of the raw -> display mapping. Below RAW_LINEAR_CEILING the mapping is
+# the identity, which keeps the historical Low/Medium/High cut-offs (30 and 70)
+# meaningful and leaves existing behaviour untouched for ordinary messages.
+RAW_LINEAR_CEILING = 70
+RAW_COMPRESSED_CEILING = 150
+DISPLAY_COMPRESSED_CEILING = 90
+
+
+def to_display_score(raw_score: int) -> int:
+    """Map an unbounded raw weight total onto a 0-100 presentation scale.
+
+    The mapping is monotone, so ranking between messages is preserved:
+
+    * ``0 - 70``    identity, so the Low (<30) and Medium (<70) cut-offs hold
+    * ``70 - 150``  compressed 4:1 into the 70-90 High band
+    * ``> 150``     approaches but never reaches 100, so a genuinely worse
+                    message always outranks a merely very bad one
+    """
+    raw = max(0, int(raw_score))
+    if raw <= RAW_LINEAR_CEILING:
+        return raw
+
+    if raw <= RAW_COMPRESSED_CEILING:
+        span_raw = RAW_COMPRESSED_CEILING - RAW_LINEAR_CEILING
+        span_display = DISPLAY_COMPRESSED_CEILING - RAW_LINEAR_CEILING
+        return int(round(RAW_LINEAR_CEILING + (raw - RAW_LINEAR_CEILING) * span_display / span_raw))
+
+    # Asymptotic tail: 150 -> 90, 300 -> 95, 1500 -> 99, never 100.
+    tail = 10 * (1 - RAW_COMPRESSED_CEILING / raw)
+    return min(99, int(round(DISPLAY_COMPRESSED_CEILING + tail)))
+
+
+# Signals are grouped into independent evidence families so that, for example,
+# three authentication signals count as one line of evidence rather than three.
+# Evaluated in order; the first matching family wins.
+SIGNAL_FAMILIES = [
+    ("header forensics", ("header forensics",)),
+    ("routing forensics", ("routing forensics",)),
+    ("attachment forensics", ("attachment",)),
+    ("authentication", ("spf", "dkim", "dmarc", "authentication")),
+    ("link forensics", ("link", "hyperlink", "redirect", "shortener")),
+    ("sender identity", ("display name", "lookalike", "typosquat", "top-level domain",
+                         "punycode", "mismatched sender")),
+]
+DEFAULT_SIGNAL_FAMILY = "message content"
+
+
+def _signal_family(indicator: str) -> str:
+    indicator_lc = (indicator or "").lower()
+    for family, needles in SIGNAL_FAMILIES:
+        if any(needle in indicator_lc for needle in needles):
+            return family
+    return DEFAULT_SIGNAL_FAMILY
+
+
+CONFIDENCE_LABELS = [
+    (85, "Very High Confidence"),
+    (70, "High Confidence"),
+    (55, "Moderate Confidence"),
+    (0, "Low Confidence"),
+]
+
+# An offline-only engine should never claim certainty, so confidence is bounded.
+CONFIDENCE_FLOOR = 30
+CONFIDENCE_CEILING = 90
+
+
+def assess_confidence(
+    parsed: ParsedMessage,
+    auth: AuthVerdict,
+    routing: RoutingVerdict,
+    signals: List[PhishingSignal],
+) -> tuple[Optional[int], str]:
+    """Estimate how much verifiable evidence backs the verdict.
+
+    This is a measure of *evidence coverage*, not of threat severity: it answers
+    "how much did we have to work with", for a clean verdict as much as for a
+    malicious one. It is deliberately capped at 90 because this engine is purely
+    offline and can never be certain. Returns ``(None, ...)`` when there was
+    effectively nothing to analyse.
+    """
+    factors: List[tuple[str, bool]] = [
+        (
+            "authentication results",
+            any((getattr(auth, mech, None) or "not_present") != "not_present"
+                for mech in ("spf", "dkim", "dmarc")),
+        ),
+        ("verifiable routing chain", bool(routing) and routing.hop_count >= 2),
+        ("message body", bool(parsed.body_plain or parsed.body_html)),
+    ]
+
+    # Corroboration only applies when something actually fired; a message with
+    # no indicators is not "less certain" for lacking them.
+    if signals:
+        families = {_signal_family(s.indicator) for s in signals}
+        factors.append(("indicators corroborated across multiple analysis families",
+                        len(families) >= 3))
+
+    satisfied = [name for name, ok in factors if ok]
+    missing = [name for name, ok in factors if not ok]
+
+    if not satisfied:
+        return None, "Insufficient evidence"
+
+    score = int(round(CONFIDENCE_FLOOR + (CONFIDENCE_CEILING - CONFIDENCE_FLOOR) * len(satisfied) / len(factors)))
+    label = next(text for threshold, text in CONFIDENCE_LABELS if score >= threshold)
+    if missing:
+        label += " - limited by missing " + ", ".join(missing)
+    return score, label
+
+# Authentication verdicts, graded by how strongly they indicate spoofing.
+# Hard failures are heavily weighted; soft, absent or unknown results carry a
+# small weight so that legitimately unsigned mail (plenty of small-business and
+# marketing senders) cannot reach High on authentication alone. The combined
+# weight of spf=none + dkim=none + dmarc=none stays inside the Low band.
+# Verdicts not listed here (notably "pass") contribute nothing.
+AUTH_RESULT_WEIGHTS: dict[str, dict[str, tuple[int, str, str]]] = {
+    "spf": {
+        "fail": (30, "SPF Authentication Failure",
+                 "SPF check failed for sender domain '{domain}' — the sending server is not authorised."),
+        "softfail": (15, "Weak SPF Result (SoftFail)",
+                     "SPF soft-failed for sender domain '{domain}': the domain owner marks this server as probably unauthorised."),
+        "permerror": (5, "SPF Record Error",
+                      "The SPF record for '{domain}' could not be evaluated (permanent error), so sender authorisation is unverified."),
+        "neutral": (5, "SPF Neutral Result",
+                    "The SPF record for '{domain}' explicitly asserts nothing about this server."),
+        "none": (8, "No SPF Record Published",
+                 "Sender domain '{domain}' publishes no SPF record, so sending servers cannot be verified."),
+        "not_present": (8, "SPF Result Absent",
+                        "No SPF result was recorded for '{domain}'; authentication was not checked or the header was stripped."),
+    },
+    "dkim": {
+        "fail": (30, "DKIM Signature Failure",
+                 "DKIM cryptographic signature failed verification — the message was altered or signed by an impostor."),
+        "policy": (5, "DKIM Signature Rejected by Policy",
+                   "A DKIM signature was present but rejected by local policy."),
+        "neutral": (5, "DKIM Neutral Result",
+                    "A DKIM signature was present but could not be evaluated."),
+        "none": (8, "Unsigned Message (No DKIM)",
+                 "The message carries no DKIM signature, so its integrity and origin cannot be cryptographically confirmed."),
+        "not_present": (8, "DKIM Result Absent",
+                        "No DKIM result was recorded; authentication was not checked or the header was stripped."),
+    },
+    "dmarc": {
+        "fail": (25, "DMARC Policy Violation",
+                 "DMARC alignment failed — message violates the policy published by '{domain}'."),
+        "none": (8, "No DMARC Enforcement",
+                 "Sender domain '{domain}' publishes no enforcing DMARC policy, so spoofing of this domain is not rejected."),
+        "not_present": (5, "DMARC Result Absent",
+                        "No DMARC result was recorded for '{domain}'."),
+    },
+}
+
+# Routing forensics produces free-text flags. Each rule maps a family of flags
+# onto a single scored signal, so a chain with five discontinuities is counted
+# once rather than five times. Weights are deliberately modest: routing
+# anomalies are corroborating evidence, not standalone verdicts.
+ROUTING_FLAG_RULES = [
+    (
+        "time_travel", ("time travel", "before hop"), 20,
+        "Impossible Routing Sequence",
+        "A relay recorded receiving the message before the hop that sent it, which is only possible with a forged Received header.",
+    ),
+    (
+        "no_received", ("no received: headers",), 12,
+        "Missing Received Chain",
+        "No Received headers are present, so the delivery path cannot be verified (header stripping or direct injection).",
+    ),
+    (
+        "future_timestamp", ("future timestamp",), 12,
+        "Forged / Skewed Hop Timestamp",
+        "A relay is timestamped in the future, indicating a forged header or a badly misconfigured clock.",
+    ),
+    (
+        "private_after_public", ("private ip", "appearing after public"), 10,
+        "Private IP After Public Transit",
+        "A private/loopback address appears after public internet transit, a common artefact of fabricated Received headers.",
+    ),
+    (
+        "discontinuity", ("discontinuity",), 8,
+        "Routing Chain Discontinuity",
+        "The receiving host of one hop does not match the sending host of the next, suggesting a removed or fabricated relay.",
+    ),
+    (
+        "single_hop", ("only one received hop",), 8,
+        "Single-Hop Delivery Chain",
+        "Only one Received hop was recorded, which is unusually short for internet-delivered mail and suggests direct injection.",
+    ),
+    (
+        "unparseable_timestamp", ("unparseable timestamp",), 5,
+        "Malformed Hop Timestamp",
+        "A Received header carries a timestamp that does not parse, typical of hand-crafted or script-generated headers.",
+    ),
+    (
+        "excessive_delay", ("excessive transit delay",), 4,
+        "Excessive Transit Delay",
+        "The message sat at a relay for an unusually long time, which can indicate a staging or spam relay.",
+    ),
+]
+
+# Routing evidence should corroborate, never dominate: only the strongest few
+# anomalies are scored.
+MAX_ROUTING_SIGNALS = 3
+
+
+def _score_routing_flags(routing: RoutingVerdict) -> List[PhishingSignal]:
+    if not routing or not routing.flags:
+        return []
+
+    matched: dict[str, tuple[int, str, str, List[str]]] = {}
+    for flag in routing.flags:
+        flag_lc = str(flag).lower()
+        for key, needles, weight, indicator, explanation in ROUTING_FLAG_RULES:
+            if any(needle in flag_lc for needle in needles):
+                entry = matched.setdefault(key, (weight, indicator, explanation, []))
+                entry[3].append(str(flag))
+                break
+
+    ranked = sorted(matched.values(), key=lambda item: item[0], reverse=True)
+    signals: List[PhishingSignal] = []
+    for weight, indicator, explanation, evidence in ranked[:MAX_ROUTING_SIGNALS]:
+        detail = "; ".join(evidence[:3])
+        if len(evidence) > 3:
+            detail += f" (+{len(evidence) - 3} more)"
+        signals.append(PhishingSignal(
+            indicator=f"Routing Forensics: {indicator}",
+            weight=weight,
+            explanation=explanation,
+            evidence=detail,
+        ))
+    return signals
 
 
 
 
-def _bucket(score: int) -> str:
-    if score < 0:
+
+def _bucket(display_score: int) -> str:
+    if display_score < 0:
         return "Low"
     for low, high, label in RISK_BUCKETS:
-        if low <= score <= high:
+        if low <= display_score <= high:
             return label
-    return "High"
+    return "Critical"
 
 
 def score_message(
@@ -83,8 +315,10 @@ def score_message(
     from_domain = extract_domain(parsed.from_raw)
     from_address = extract_address(parsed.from_raw)
     display_name = extract_display_name(parsed.from_raw)
-    subject = parsed.subject or ""
-    body = (parsed.body_plain or "") + "\n" + (parsed.body_html or "")
+    subject = normalize_text(parsed.subject or "")
+    # HTML markup, entities and zero-width characters are stripped so keyword
+    # and phrase matching sees the text a human actually reads.
+    body = build_match_text(parsed.body_plain, parsed.body_html)
 
     # --- URL Analysis Signals ---
     if url_verdict and url_verdict.urls:
@@ -126,8 +360,17 @@ def score_message(
                 ))
 
 
+    # --- Sender identity signals -----------------------------------------
+    # Header Forensics already scores display-name impersonation, lookalike
+    # domains, high-risk TLDs and From/Sender/Reply-To/Return-Path mismatches
+    # via its own findings (with ESP allowlists and graded risk levels).
+    # When a header verdict is supplied it is the single source of truth for
+    # those four categories; the blocks below only run when scoring is invoked
+    # standalone (e.g. unit tests, or callers without header forensics).
+    score_sender_identity_here = header_verdict is None
+
     # 1. Display Name Impersonation
-    if display_name and from_address:
+    if score_sender_identity_here and display_name and from_address:
         display_lc = display_name.lower()
         for brand_domain in KNOWN_BRAND_DOMAINS:
             brand = brand_domain.split(".")[0]
@@ -141,7 +384,7 @@ def score_message(
                 break
 
     # 2. Lookalike Domains & 3. Typosquatting
-    if from_domain:
+    if score_sender_identity_here and from_domain:
         brand = looks_like_lookalike(from_domain)
         if brand:
             signals.append(PhishingSignal(
@@ -152,7 +395,7 @@ def score_message(
             ))
 
     # 4. Suspicious TLDs
-    if from_domain:
+    if score_sender_identity_here and from_domain:
         tld = from_domain.rsplit(".", 1)[-1].lower()
         if tld in HIGH_RISK_TLDS:
             signals.append(PhishingSignal(
@@ -162,7 +405,7 @@ def score_message(
                 evidence=f"Domain: '{from_domain}'"
             ))
 
-    # 5. Unicode / Punycode Domains
+    # 5. Unicode / Punycode Domains (not covered by header forensics)
     if from_domain:
         unicode_reason = is_punycode_or_unicode(from_domain)
         if unicode_reason:
@@ -174,30 +417,33 @@ def score_message(
             ))
 
     # 6. Mismatched Sender Domains
-    sender_domain = extract_domain(parsed.sender_raw)
-    reply_to_domain = extract_domain(parsed.reply_to_raw)
-    return_path_domain = extract_domain(parsed.return_path_raw)
+    if score_sender_identity_here:
+        sender_domain = extract_domain(parsed.sender_raw)
+        reply_to_domain = extract_domain(parsed.reply_to_raw)
+        return_path_domain = extract_domain(parsed.return_path_raw)
 
-    mismatches = []
-    if sender_domain and from_domain and sender_domain != from_domain:
-        mismatches.append(f"Sender ('{sender_domain}')")
-    if reply_to_domain and from_domain and reply_to_domain != from_domain:
-        mismatches.append(f"Reply-To ('{reply_to_domain}')")
-    if return_path_domain and from_domain and return_path_domain != from_domain:
-        mismatches.append(f"Return-Path ('{return_path_domain}')")
+        mismatches = []
+        if sender_domain and from_domain and sender_domain != from_domain:
+            mismatches.append(f"Sender ('{sender_domain}')")
+        if reply_to_domain and from_domain and reply_to_domain != from_domain:
+            mismatches.append(f"Reply-To ('{reply_to_domain}')")
+        if return_path_domain and from_domain and return_path_domain != from_domain:
+            mismatches.append(f"Return-Path ('{return_path_domain}')")
 
-    if mismatches:
-        signals.append(PhishingSignal(
-            indicator="Mismatched Sender Domains",
-            weight=20,
-            explanation="Header From domain does not align with transmitter or bounce address domains.",
-            evidence=f"From Domain: '{from_domain}' | Mismatches: {', '.join(mismatches)}"
-        ))
+        if mismatches:
+            signals.append(PhishingSignal(
+                indicator="Mismatched Sender Domains",
+                weight=20,
+                explanation="Header From domain does not align with transmitter or bounce address domains.",
+                evidence=f"From Domain: '{from_domain}' | Mismatches: {', '.join(mismatches)}"
+            ))
 
 
 
     # 10. Suspicious Keywords in Subject / Body
-    suspicious_kw = ["confidential", "security alert", "suspicious activity", "action required", "account notice"]
+    # "confidential" was removed: it is boilerplate in corporate email footers
+    # and disclaimers, and was the single largest source of false positives.
+    suspicious_kw = ["security alert", "suspicious activity", "action required", "account notice"]
     found_kws = [kw for kw in suspicious_kw if kw in subject.lower() or kw in body.lower()]
     if found_kws:
         signals.append(PhishingSignal(
@@ -268,27 +514,22 @@ def score_message(
             break
 
     # --- Authentication Signals ---
-    if auth.spf == "fail":
+    for mechanism, verdict, details in (
+        ("spf", auth.spf, auth.spf_details),
+        ("dkim", auth.dkim, auth.dkim_details),
+        ("dmarc", auth.dmarc, auth.dmarc_details),
+    ):
+        rule = AUTH_RESULT_WEIGHTS.get(mechanism, {}).get((verdict or "").lower())
+        if not rule:
+            continue
+        weight, indicator, explanation = rule
         signals.append(PhishingSignal(
-            indicator="SPF Authentication Failure",
-            weight=30,
-            explanation=f"SPF check failed for sender domain '{from_domain}'.",
-            evidence=f"SPF Verdict: FAIL | Details: {auth.spf_details}"
+            indicator=indicator,
+            weight=weight,
+            explanation=explanation.format(domain=from_domain or "unknown"),
+            evidence=f"{mechanism.upper()} Verdict: {(verdict or '').upper()} | Details: {details or '-'}"
         ))
-    if auth.dkim == "fail":
-        signals.append(PhishingSignal(
-            indicator="DKIM Signature Failure",
-            weight=30,
-            explanation="DKIM cryptographic signature failed verification.",
-            evidence=f"DKIM Verdict: FAIL | Details: {auth.dkim_details}"
-        ))
-    if auth.dmarc == "fail":
-        signals.append(PhishingSignal(
-            indicator="DMARC Policy Violation",
-            weight=25,
-            explanation="DMARC alignment failed — message violates domain policy.",
-            evidence=f"DMARC Verdict: FAIL | Details: {auth.dmarc_details}"
-        ))
+
     if auth.inconsistencies:
         for inc in auth.inconsistencies:
             signals.append(PhishingSignal(
@@ -310,32 +551,62 @@ def score_message(
                 evidence=f"[{hf.risk_level}] {hf.evidence}"
             ))
 
+    # --- Routing Forensics Signals ---
+    signals.extend(_score_routing_flags(routing))
+
     # --- Risky Attachments ---
+    # Consumes the flags computed by the Attachment Forensics Engine, falling
+    # back to a local re-check when scoring runs before/without that stage.
+    # Each attachment contributes at most one signal, weighted by its worst
+    # property, so a macro-enabled executable is not counted twice.
     for att in parsed.attachments:
         filename = att.filename
-        ext = att.declared_extension
-        reasons = []
-        if ext in RISKY_EXTENSIONS:
-            reasons.append(f"executable/script extension '.{ext}'")
-        if has_double_extension(filename):
-            reasons.append("double extension (e.g. invoice.pdf.exe)")
+        ext = att.declared_extension or ""
+        reasons: List[tuple[int, str]] = []
+
+        if getattr(att, "has_double_extension", False) or has_double_extension(filename):
+            reasons.append((35, "double extension masking the real file type (e.g. invoice.pdf.exe)"))
+        if getattr(att, "is_executable", False) or ext in RISKY_EXTENSIONS:
+            reasons.append((30, f"executable/script payload (extension '.{ext}', signature '{att.true_type}')"))
+        elif getattr(att, "is_script", False):
+            reasons.append((30, f"script payload (extension '.{ext}')"))
         if att.true_type == "exe" and ext not in {"exe", "dll", "scr", "com"}:
-            reasons.append(f"true file signature is executable but extension is '.{ext}'")
-        if reasons:
-            signals.append(PhishingSignal(
-                indicator="Executable / Suspicious Attachment",
-                weight=30,
-                explanation="Attachment contains risky extensions or signature mismatch.",
-                evidence=f"Filename: '{filename}' | Issues: {'; '.join(reasons)}"
-            ))
+            reasons.append((30, f"true file signature is executable but extension is '.{ext}'"))
+        if getattr(att, "is_macro_enabled", False):
+            reasons.append((25, f"macro-enabled Office document (extension '.{ext}')"))
+        if getattr(att, "is_password_protected", False):
+            reasons.append((20, "password-protected archive that cannot be scanned"))
+        if getattr(att, "suspicious_name_flag", False):
+            reasons.append((10, "social-engineering lure or randomised filename"))
+
+        if not reasons:
+            continue
+
+        weight = max(w for w, _ in reasons)
+        detail = "; ".join(text for _, text in reasons)
+        engine_findings = getattr(att, "findings", None) or []
+        if engine_findings:
+            detail += f" | Engine: {'; '.join(engine_findings[:4])}"
+
+        signals.append(PhishingSignal(
+            indicator="Executable / Suspicious Attachment",
+            weight=weight,
+            explanation="Attachment forensics flagged a risky payload, masked extension, macro container, or unscannable archive.",
+            evidence=f"Filename: '{filename}' | Issues: {detail}"
+        ))
 
     total = sum(s.weight for s in signals)
-    logger.info(f"Message scored {total} ({_bucket(total)} risk).")
+    display = to_display_score(total)
+    confidence, confidence_label = assess_confidence(parsed, auth, routing, signals)
+    logger.info(f"Message scored {display}/100 ({_bucket(display)} risk, raw weight total {total}).")
 
     return ScoringVerdict(
         total_score=total,
-        risk_level=_bucket(total),
+        risk_level=_bucket(display),
         signals=signals,
+        display_score=display,
+        confidence=confidence,
+        confidence_label=confidence_label,
     )
 
 

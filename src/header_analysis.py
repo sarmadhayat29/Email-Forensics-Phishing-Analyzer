@@ -14,17 +14,13 @@ from utils import (
     extract_domain,
     extract_display_name,
     looks_like_lookalike,
+    registrable_domain,
     KNOWN_BRAND_DOMAINS,
+    HIGH_RISK_TLDS,
 )
 from logger import get_logger
 
 logger = get_logger(__name__)
-
-# High-risk TLDs commonly seen in spam/phishing campaigns
-HIGH_RISK_TLDS = {
-    "xyz", "top", "work", "buzz", "click", "country", "tk", "ml",
-    "ga", "cf", "gq", "fit", "surf", "icu", "rest", "monster", "live"
-}
 
 # Known automated script/spam mailers
 SUSPICIOUS_MAILERS = [
@@ -255,6 +251,20 @@ def _check_suspicious_x_headers(parsed: ParsedMessage, findings: List[HeaderFind
         ))
 
 
+AUTHSERV_ID_RE = re.compile(r"^\s*([A-Za-z0-9_.:\[\]-]+)\s*;")
+RECEIVED_BY_RE = re.compile(r"\bby\s+([A-Za-z0-9._-]+)", re.IGNORECASE)
+
+
+def _received_by_hosts(parsed: ParsedMessage) -> set[str]:
+    """Hostnames that claimed to receive the message ('by' clauses)."""
+    hosts: set[str] = set()
+    for raw in parsed.received_chain or []:
+        match = RECEIVED_BY_RE.search(str(raw))
+        if match:
+            hosts.add(match.group(1).lower().strip("."))
+    return hosts
+
+
 def _check_forged_auth_results(parsed: ParsedMessage, findings: List[HeaderFinding]) -> None:
     auth_results = parsed.authentication_results
     if not auth_results:
@@ -270,16 +280,49 @@ def _check_forged_auth_results(parsed: ParsedMessage, findings: List[HeaderFindi
             recommendation="Verify if previous hops or attackers injected false Authentication-Results headers."
         ))
 
-    # Check for internal header forgery where auth results claim PASS without valid MTA hostname
+    # An Authentication-Results header is only trustworthy if its authserv-id
+    # identifies a host that actually handled the message. Rather than pattern
+    # matching MTA brand names (which flagged most legitimate mail), compare the
+    # authserv-id against the receiving hops in the Received chain.
+    by_hosts = _received_by_hosts(parsed)
+
     for ar in auth_results:
-        ar_str = str(ar)
-        if "pass" in ar_str.lower() and not re.search(r"\b(mx|mail|smtp|google|outlook|microsoft|amazon|proofpoint|mimecast)\b", ar_str, re.I):
+        ar_str = str(ar).strip()
+        if "pass" not in ar_str.lower():
+            continue
+
+        match = AUTHSERV_ID_RE.match(ar_str)
+        authserv_id = match.group(1).lower().strip(".") if match else ""
+
+        if not authserv_id or "." not in authserv_id:
             findings.append(HeaderFinding(
-                title="Potentially Forged Authentication-Results Header",
-                description="Authentication-Results header claims authentication PASS but lacks verified MTA identity signature.",
-                risk_level="High",
-                evidence=f"Header: '{ar_str[:120]}...'",
-                recommendation="Cross-examine Received header chain; do not rely solely on unverified Authentication-Results headers."
+                title="Authentication-Results Missing Authserv-ID",
+                description="The Authentication-Results header claims a PASS but does not identify the verifying host with a fully-qualified authserv-id (RFC 8601).",
+                risk_level="Medium",
+                evidence=f"Header: '{ar_str[:120]}'",
+                recommendation="Cross-examine the Received header chain; an unattributed PASS cannot be trusted."
+            ))
+            break
+
+        # Without a Received chain there is nothing to corroborate against;
+        # the missing chain itself is already reported by routing analysis.
+        if not by_hosts:
+            break
+
+        aligned = any(
+            authserv_id == host
+            or host.endswith("." + authserv_id)
+            or authserv_id.endswith("." + host)
+            or registrable_domain(authserv_id) == registrable_domain(host)
+            for host in by_hosts
+        )
+        if not aligned:
+            findings.append(HeaderFinding(
+                title="Unattributed Authentication-Results Header",
+                description="The Authentication-Results header claims a PASS but its authserv-id does not correspond to any host in the Received chain.",
+                risk_level="Medium",
+                evidence=f"Authserv-ID: '{authserv_id}' | Received 'by' hosts: {sorted(by_hosts)}",
+                recommendation="Verify whether an upstream hop or the sender injected a forged Authentication-Results header."
             ))
             break
 

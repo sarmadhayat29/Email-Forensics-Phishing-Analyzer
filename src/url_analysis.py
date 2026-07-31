@@ -15,14 +15,15 @@ from utils import (
     is_punycode_or_unicode,
     looks_like_lookalike,
     detect_redirect_param,
+    is_plausible_hostname,
+    registrable_domain,
     IP_HOST_RE,
     SHORTENER_DOMAINS,
+    HIGH_RISK_TLDS,
 )
 from logger import get_logger
 
 logger = get_logger(__name__)
-
-HIGH_RISK_TLDS = {"xyz", "top", "work", "buzz", "click", "country", "tk", "ml", "ga", "cf", "gq", "fit", "surf", "icu"}
 
 HTML_LINK_RE = re.compile(r'<a\s+[^>]*href=["\']([^"\']+)["\'][^>]*>(.*?)</a>', re.IGNORECASE | re.DOTALL)
 PLAIN_URL_RE = re.compile(r'https?://[^\s<>"\']+', re.IGNORECASE)
@@ -137,9 +138,11 @@ def _analyze_single_url(raw_url: str, anchor_text: str = "") -> ExtractedURL | N
         findings.append(f"Link contains open-redirect parameter ({redirect_res})")
 
     # Check 5: Mismatched Hyperlink Anchor Text (Deceptive link)
-    if anchor_text:
-        anchor_domain = extract_domain(anchor_text) or _extract_host_from_text(anchor_text)
-        if anchor_domain and host and anchor_domain.lower() != host:
+    if anchor_text and host:
+        anchor_host = _extract_anchor_host(anchor_text)
+        # Compare registrable domains so www./links. subdomains of the same
+        # organisation are not reported as deceptive.
+        if anchor_host and registrable_domain(anchor_host) != registrable_domain(host):
             is_mismatched = True
             findings.append(f"Mismatched Hyperlink: Anchor text displays '{anchor_text}' but link targets '{host}'")
 
@@ -161,6 +164,36 @@ def _strip_tags(text: str) -> str:
     return re.sub(r'<[^>]+>', '', text)
 
 
-def _extract_host_from_text(text: str) -> str | None:
-    match = re.search(r'\b([a-zA-Z0-9-]+\.[a-zA-Z0-9.-]+)\b', text)
-    return match.group(1).lower() if match else None
+HOSTNAME_CANDIDATE_RE = re.compile(
+    r'\b([a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]*[a-zA-Z0-9])?)+)\b'
+)
+
+
+def _extract_anchor_host(anchor_text: str) -> str | None:
+    """Extract the hostname an anchor *claims* to point at, if it claims one.
+
+    Returns None for ordinary link text ('Click here', 'invoice.pdf',
+    'Release 2.1') so only genuine domain claims can trigger a mismatch.
+    """
+    text = (anchor_text or "").strip()
+    if not text:
+        return None
+
+    if "://" in text:
+        try:
+            host = (urlparse(text).hostname or "").lower()
+        except ValueError:
+            host = ""
+        if host and (is_plausible_hostname(host) or IP_HOST_RE.match(host)):
+            return host
+
+    email_domain = extract_domain(text)
+    if email_domain and is_plausible_hostname(email_domain):
+        return email_domain
+
+    for match in HOSTNAME_CANDIDATE_RE.finditer(text):
+        candidate = match.group(1).lower()
+        if is_plausible_hostname(candidate):
+            return candidate
+
+    return None

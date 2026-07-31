@@ -130,9 +130,17 @@ class PhishingSignal:
 
 @dataclass
 class ScoringVerdict:
+    #: Raw sum of triggered signal weights. Unbounded; used internally and for
+    #: analyst transparency.
     total_score: int
     risk_level: str
     signals: list[PhishingSignal] = field(default_factory=list)
+    #: Raw score mapped onto a 0-100 presentation scale (rank preserving).
+    display_score: int = 0
+    #: How much verifiable evidence backed the verdict, 0-100, or None when
+    #: there was too little evidence to make a claim.
+    confidence: Optional[int] = None
+    confidence_label: str = "Unknown"
 
 
 @dataclass
@@ -191,9 +199,14 @@ class Finding:
     mime_structure: str
     header_findings: list[HeaderFinding]
     url_analysis: URLAnalysisVerdict
+    #: Presentation risk score on a 0-100 scale.
     score: int
     risk_level: str
     signals: list[PhishingSignal]
+    #: Raw weighted-evidence total behind ``score``, kept for analyst audit.
+    raw_score: int = 0
+    confidence: Optional[int] = None
+    confidence_label: str = "Unknown"
 
 
 
