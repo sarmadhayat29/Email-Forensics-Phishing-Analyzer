@@ -1,3 +1,5 @@
+const API_BASE = import.meta.env.VITE_API_URL || "";
+
 const getAuthHeaders = () => {
   const token = localStorage.getItem('token');
   return token ? { 'Authorization': `Bearer ${token}` } : {};
@@ -17,7 +19,7 @@ const handleResponse = async (response) => {
 };
 
 export const login = async (email, password) => {
-  const response = await fetch('/api/auth/login', {
+  const response = await fetch(`${API_BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -26,7 +28,7 @@ export const login = async (email, password) => {
 };
 
 export const signup = async (email, password) => {
-  const response = await fetch('/api/auth/signup', {
+  const response = await fetch(`${API_BASE}/api/auth/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email, password }),
@@ -35,7 +37,7 @@ export const signup = async (email, password) => {
 };
 
 export const getMe = async () => {
-  const response = await fetch('/api/auth/me', {
+  const response = await fetch(`${API_BASE}/api/auth/me`, {
     headers: getAuthHeaders(),
   });
   return handleResponse(response);
@@ -45,7 +47,7 @@ export const uploadEmailPayload = async (file) => {
   const formData = new FormData();
   formData.append('file', file);
   
-  const response = await fetch('/api/upload', {
+  const response = await fetch(`${API_BASE}/api/upload`, {
     method: 'POST',
     headers: getAuthHeaders(),
     body: formData,
@@ -54,7 +56,7 @@ export const uploadEmailPayload = async (file) => {
 };
 
 export const analyzePayload = async (fileId) => {
-  const response = await fetch(`/api/analyze/${fileId}`, {
+  const response = await fetch(`${API_BASE}/api/analyze/${fileId}`, {
     method: 'POST',
     headers: getAuthHeaders(),
   });
@@ -68,21 +70,21 @@ export const fetchHistory = async (search, sort, filter) => {
     risk_level: filter || 'All'
   });
   
-  const response = await fetch(`/api/analyses?${queryParams.toString()}`, {
+  const response = await fetch(`${API_BASE}/api/analyses?${queryParams.toString()}`, {
     headers: getAuthHeaders(),
   });
   return handleResponse(response);
 };
 
 export const fetchAnalysis = async (recordId) => {
-  const response = await fetch(`/api/analyses/${recordId}`, {
+  const response = await fetch(`${API_BASE}/api/analyses/${recordId}`, {
     headers: getAuthHeaders(),
   });
   return handleResponse(response);
 };
 
 export const deleteAnalysisRecord = async (recordId) => {
-  const response = await fetch(`/api/analyses/${recordId}`, {
+  const response = await fetch(`${API_BASE}/api/analyses/${recordId}`, {
     method: 'DELETE',
     headers: getAuthHeaders(),
   });
@@ -99,7 +101,7 @@ export const deleteAnalysisRecord = async (recordId) => {
 };
 
 export const downloadReport = async (fileId, type) => {
-  const response = await fetch(`/api/report/${fileId}/download/${type}`, {
+  const response = await fetch(`${API_BASE}/api/report/${fileId}/download/${type}`, {
     headers: getAuthHeaders(),
   });
   if (response.status === 401) {
