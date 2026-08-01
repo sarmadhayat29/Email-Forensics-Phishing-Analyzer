@@ -18,8 +18,9 @@ from utils import (
     domain_relationship,
     is_legitimate_esp,
     same_organization,
-    KNOWN_BRAND_DOMAINS,
+    display_name_brand_conflict,
     HIGH_RISK_TLDS,
+    CORE_ABUSE_TLDS,
 )
 from logger import get_logger
 
@@ -28,7 +29,7 @@ logger = get_logger(__name__)
 # Known automated script/spam mailers
 SUSPICIOUS_MAILERS = [
     "phpmailer", "python-urllib", "go-http-client", "darkmailer",
-    "massmail", "anonymouse", "libwww", "curl", "sendgrid-php",
+    "massmail", "anonymouse", "libwww", "curl",
     "custom-script", "smtp-client"
 ]
 
@@ -78,17 +79,15 @@ def _check_display_name_spoofing(parsed: ParsedMessage, findings: List[HeaderFin
             return
 
     # 2. Display name references a well-known brand, but sending domain is unassociated
-    for brand_domain in KNOWN_BRAND_DOMAINS:
-        brand = brand_domain.split(".")[0]
-        if brand in display_name_lc and brand not in from_domain:
-            findings.append(HeaderFinding(
-                title="Display Name Brand Impersonation",
-                description=f"The display name references brand '{brand}', but the actual sending domain is '{from_domain}'.",
-                risk_level="High",
-                evidence=f"Display Name: '{display_name}' | Sending Domain: '{from_domain}'",
-                recommendation="Verify sender identity out-of-band; domain does not belong to the referenced brand."
-            ))
-            break
+    brand = display_name_brand_conflict(display_name, from_domain)
+    if brand:
+        findings.append(HeaderFinding(
+            title="Display Name Brand Impersonation",
+            description=f"The display name references brand '{brand}', but the actual sending domain is '{from_domain}'.",
+            risk_level="High",
+            evidence=f"Display Name: '{display_name}' | Sending Domain: '{from_domain}'",
+            recommendation="Verify sender identity out-of-band; domain does not belong to the referenced brand."
+        ))
 
 
 def _check_from_vs_sender(parsed: ParsedMessage, findings: List[HeaderFinding]) -> None:

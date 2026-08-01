@@ -25,10 +25,10 @@ from html_analysis import (
 from utils import (
     extract_domain, extract_address, extract_display_name,
     looks_like_lookalike, is_punycode_or_unicode,
-    domain_relationship,
+    domain_relationship, display_name_brand_conflict,
     detect_redirect_param, has_double_extension, RISKY_EXTENSIONS,
     KNOWN_BRAND_DOMAINS, build_match_text, normalize_text,
-    HIGH_RISK_TLDS, registrable_domain, TRUSTED_TRANSACTIONAL_DOMAINS,
+    HIGH_RISK_TLDS, CORE_ABUSE_TLDS, registrable_domain, TRUSTED_TRANSACTIONAL_DOMAINS,
 )
 from logger import get_logger
 
@@ -50,21 +50,23 @@ URGENCY_PATTERNS = [
 ]
 
 # Keep only phrases that imply *outbound payment fraud*, not ordinary receipts.
-# Removed: "payment confirmation", "bank deposit" (Amazon/Chase/PayPal FP sources).
-FINANCIAL_PATTERNS = [
+# Removed: "payment confirmation", "bank deposit", "overdue payment" (AR/billing FP).
+FINANCIAL_SCAM_PATTERNS = [
     r"\bwire\s+transfer\b", r"\bbitcoin\b", r"\bcrypto\s+payment\b",
-    r"\bgift\s+card\b", r"\boverdue\s+payment\b",
-    r"\btransfer\s+funds\b"
+    r"\bgift\s+card\b", r"\btransfer\s+funds\b",
 ]
 
-# Invoice language is common in legitimate billing. Kept as a weak indicator;
-# High risk requires corroboration (urgency, spoofing, bad TLD, auth failure).
-# Removed: "receipt for your payment" (PayPal/Stripe receipts).
+# Ordinary billing language — weak corroborator only (never High alone).
 INVOICE_PATTERNS = [
     r"\binvoice\s*#?\s*\d+\b", r"\bpurchase\s+order\s*#?\s*\d+\b",
     r"\bremittance\s+advice\b",
-    r"\battached\s+invoice\b", r"\bpayment\s+due\b"
+    r"\battached\s+invoice\b", r"\bpayment\s+due\b",
+    r"\boverdue\s+payment\b",
 ]
+
+# Back-compat alias for older imports / tests.
+FINANCIAL_PATTERNS = FINANCIAL_SCAM_PATTERNS
+
 
 # Bare "reset password" fires on every legitimate IdP email. Prefer scam-shaped
 # variants that claim compromise or forced expiry.
@@ -381,22 +383,23 @@ def _score_routing_flags(routing: RoutingVerdict) -> List[PhishingSignal]:
 # lands mid-High rather than Critical, which is the intended balance.
 DOMAIN_AGE_WEIGHTS = {
     ("sender", "newly_registered"): (
-        25, "Newly Registered Sender Domain",
+        15, "Newly Registered Sender Domain",
         "The sender's domain was registered within the newly-registered-domain window. "
-        "Disposable domains registered days before use are a hallmark of phishing infrastructure.",
+        "Disposable domains registered days before use are a hallmark of phishing infrastructure, "
+        "but age alone is not proof of malice.",
     ),
     ("sender", "young"): (
-        12, "Recently Registered Sender Domain",
+        8, "Recently Registered Sender Domain",
         "The sender's domain is young. Legitimate correspondents usually write from long-established "
         "domains, so this warrants corroboration rather than action on its own.",
     ),
     ("link", "newly_registered"): (
-        15, "Newly Registered Link Domain",
+        10, "Newly Registered Link Domain",
         "A link in the message points at a domain registered within the newly-registered-domain window, "
         "typical of throwaway credential-harvesting infrastructure.",
     ),
     ("link", "young"): (
-        8, "Recently Registered Link Domain",
+        5, "Recently Registered Link Domain",
         "A link in the message points at a recently registered domain.",
     ),
 }
@@ -426,7 +429,8 @@ def _score_domain_age(findings: Optional[List[DomainAgeFinding]]) -> List[Phishi
             evidence += f" | Registrar: {finding.registrar}"
         candidates.append((weight, _make_signal(
             f"Domain Reputation: {indicator}", weight, explanation, evidence,
-            strength="strong" if weight >= 15 else "weak",
+            # NRD is corroborating evidence — never alone enough for High.
+            strength="weak",
         )))
 
     candidates.sort(key=lambda item: item[0], reverse=True)
@@ -466,14 +470,14 @@ HTML_SIGNAL_WEIGHTS: dict[str, dict[str, int]] = {
     HIDDEN_TEXT: {"High": 20, "Medium": 10, "Low": 4},
     IFRAME: {"High": 20, "Medium": 15},
     FORM_EXTERNAL_ACTION: {"Medium": 15},
-    SCRIPT: {"Medium": 12},
-    ACTIVE_CONTENT: {"Medium": 12},
+    SCRIPT: {"Medium": 6},
+    ACTIVE_CONTENT: {"Medium": 6},
     FORM_CREDENTIAL_FIELDS: {"Medium": 12},
     COMMENT_OBFUSCATION: {"Medium": 12},
     DATA_URI_OTHER: {"Medium": 10},
     ENTITY_OBFUSCATION: {"Medium": 8},
-    EVENT_HANDLER: {"Medium": 8},
-    IMAGE_ONLY_BODY: {"Low": 5},
+    EVENT_HANDLER: {"Medium": 6},
+    IMAGE_ONLY_BODY: {"Low": 2},
 }
 
 #: Applied when a detector reports a severity the table does not list, so a new
@@ -695,9 +699,8 @@ TRUSTED_SENDER_SUPPRESSED_INDICATORS = {
 #: Hard authentication failures are strong spoofing evidence.
 AUTH_STRONG_VERDICTS = {"fail"}
 
-#: Minimum strong-signal weight to allow High without a second family.
-MIN_STRONG_WEIGHT_FOR_HIGH = 40
-#: Minimum distinct strong families to allow High.
+#: Minimum distinct strong families to allow High/Critical.
+#: Single-family piles (billing language, soft auth) must not reach High alone.
 MIN_STRONG_FAMILIES_FOR_HIGH = 2
 
 
@@ -801,7 +804,6 @@ def _apply_high_risk_gate(
     weak = [s for s in active if s.strength != "strong"]
     strong_weight = sum(s.weight for s in strong)
     strong_families = {_signal_family(s.indicator) for s in strong}
-    all_families = {_signal_family(s.indicator) for s in active}
 
     strong_names = [s.indicator for s in sorted(strong, key=lambda x: -x.weight)[:5]]
     weak_names = [s.indicator for s in sorted(weak, key=lambda x: -x.weight)[:5]]
@@ -814,20 +816,24 @@ def _apply_high_risk_gate(
         f"Weak: {', '.join(weak_names) or 'none'}."
     )
 
+    # High/Critical require ≥2 independent strong families. Promote from
+    # upper-Medium (≥55) when that bar is met — evidence over raw score band.
+    if (
+        len(strong_families) >= MIN_STRONG_FAMILIES_FOR_HIGH
+        and display_score >= 55
+        and strong_families != {"authentication"}
+    ):
+        level = "Critical" if display_score >= 90 else "High"
+        reason = (
+            f"{level}: {len(strong_families)} independent strong evidence "
+            f"families (required >={MIN_STRONG_FAMILIES_FOR_HIGH})."
+        )
+        return level, reason, evidence_summary + " " + reason
+
     if provisional in {"Low", "Medium"}:
         reason = f"Score in {provisional} band ({display_score})."
         return provisional, reason, evidence_summary + " " + reason
 
-    # High / Critical provisional — demand strong corroboration.
-    if len(strong_families) >= MIN_STRONG_FAMILIES_FOR_HIGH:
-        reason = (
-            f"{provisional}: {len(strong_families)} independent strong evidence "
-            f"families (required >={MIN_STRONG_FAMILIES_FOR_HIGH})."
-        )
-        return provisional, reason, evidence_summary + " " + reason
-
-    # Authentication failures alone must not produce High/Critical — they need
-    # corroboration from another family (impersonation, malware, credential lure).
     if strong_families == {"authentication"}:
         reason = (
             f"Demoted from {provisional} to Medium: authentication failures alone "
@@ -836,24 +842,9 @@ def _apply_high_risk_gate(
         )
         return "Medium", reason, evidence_summary + " " + reason
 
-    if strong_weight >= MIN_STRONG_WEIGHT_FOR_HIGH:
-        reason = (
-            f"{provisional}: strong evidence weight {strong_weight} "
-            f"(required >={MIN_STRONG_WEIGHT_FOR_HIGH})."
-        )
-        return provisional, reason, evidence_summary + " " + reason
-
-    other_families = all_families - strong_families
-    if strong_weight >= 25 and other_families:
-        reason = (
-            f"{provisional}: strong weight {strong_weight} corroborated by "
-            f"family(ies) {', '.join(sorted(other_families))}."
-        )
-        return provisional, reason, evidence_summary + " " + reason
-
     reason = (
         f"Demoted from {provisional} to Medium: score {display_score} lacked "
-        f"multiple strong indicators (strong weight={strong_weight}, "
+        f"multiple independent strong families (strong weight={strong_weight}, "
         f"strong families={len(strong_families)})."
     )
     return "Medium", reason, evidence_summary + " " + reason
@@ -989,12 +980,22 @@ def score_message(
                     strength="weak",
                 ))
             if u.is_suspicious_domain:
-                signals.append(_make_signal(
-                    "Suspicious Link Domain", 20,
-                    "Link targets a domain with high-risk TLD, Punycode, or lookalike patterns.",
-                    f"Domain: '{u.domain}'",
-                    strength="strong",
-                ))
+                findings_blob = " ".join(u.findings or []).lower()
+                # Lookalike / punycode are strong; risky TLD alone is weak.
+                if any(k in findings_blob for k in ("lookalike", "punycode", "unicode")):
+                    signals.append(_make_signal(
+                        "Suspicious Link Domain", 25,
+                        "Link targets a lookalike or Punycode/Unicode domain.",
+                        f"Domain: '{u.domain}' | {'; '.join(u.findings or [])}",
+                        strength="strong",
+                    ))
+                else:
+                    signals.append(_make_signal(
+                        "Suspicious Link Domain", 10,
+                        "Link uses a high-risk top-level domain. Common on phishing hosts but also on some legitimate sites.",
+                        f"Domain: '{u.domain}'",
+                        strength="weak",
+                    ))
             if (_cross_domain_redirect(u.raw_url)
                     and not any(sig.indicator == "Multiple / Open Redirect Link Parameter"
                                 for sig in signals)):
@@ -1015,19 +1016,16 @@ def score_message(
     # standalone (e.g. unit tests, or callers without header forensics).
     score_sender_identity_here = header_verdict is None
 
-    # 1. Display Name Impersonation
+    # 1. Display Name Impersonation — whole-word brand tokens only
     if score_sender_identity_here and display_name and from_address:
-        display_lc = display_name.lower()
-        for brand_domain in KNOWN_BRAND_DOMAINS:
-            brand = brand_domain.split(".")[0]
-            if brand in display_lc and from_domain and brand not in from_domain:
-                signals.append(_make_signal(
-                    "Display Name Impersonation", 25,
-                    f"Display name references known brand '{brand}', but actual sending domain is '{from_domain}'.",
-                    f"Display Name: '{display_name}' | From: '{from_address}'",
-                    strength="strong",
-                ))
-                break
+        brand = display_name_brand_conflict(display_name, from_domain or "")
+        if brand:
+            signals.append(_make_signal(
+                "Display Name Impersonation", 25,
+                f"Display name references known brand '{brand}', but actual sending domain is '{from_domain}'.",
+                f"Display Name: '{display_name}' | From: '{from_address}'",
+                strength="strong",
+            ))
 
     # 2. Lookalike Domains & 3. Typosquatting
     if score_sender_identity_here and from_domain:
@@ -1040,15 +1038,23 @@ def score_message(
                 strength="strong",
             ))
 
-    # 4. Suspicious TLDs — strong when on the *sender* identity
+    # 4. Suspicious TLDs — strong only for core free/abuse TLDs (.tk/.ml/…)
     if score_sender_identity_here and from_domain:
         tld = from_domain.rsplit(".", 1)[-1].lower()
-        if tld in HIGH_RISK_TLDS:
+        if tld in CORE_ABUSE_TLDS:
             signals.append(_make_signal(
                 "High-Risk Top-Level Domain (TLD)", 20,
-                f"Sender domain uses high-risk top-level domain '.{tld}'.",
+                f"Sender domain uses free/abuse-prone top-level domain '.{tld}'.",
                 f"Domain: '{from_domain}'",
                 strength="strong",
+            ))
+        elif tld in HIGH_RISK_TLDS:
+            signals.append(_make_signal(
+                "High-Risk Top-Level Domain (TLD)", 10,
+                f"Sender domain uses high-risk top-level domain '.{tld}'. "
+                f"Corroborating evidence is required before treating this as phishing.",
+                f"Domain: '{from_domain}'",
+                strength="weak",
             ))
 
     # 5. Unicode / Punycode Domains (not covered by header forensics)
@@ -1142,8 +1148,8 @@ def score_message(
             ))
             break
 
-    # 13. Financial Scam Language — strong for wire/crypto/gift-card asks
-    for pat in FINANCIAL_PATTERNS:
+    # 13. Financial scam language — wire / crypto / gift-card only (strong)
+    for pat in FINANCIAL_SCAM_PATTERNS:
         match = re.search(pat, body, re.I) or re.search(pat, subject, re.I)
         if match:
             signals.append(_make_signal(
@@ -1154,15 +1160,16 @@ def score_message(
             ))
             break
 
-    # 14. Fake Invoice Indicators — strong but suppressed for trusted senders
+    # 14. Invoice / billing language — weak; ordinary in legitimate AR mail
     for pat in INVOICE_PATTERNS:
         match = re.search(pat, body, re.I) or re.search(pat, subject, re.I)
         if match:
             signals.append(_make_signal(
-                "Fake Invoice / BEC Indicators", 25,
-                "Email references invoices or purchase orders typical of Business Email Compromise (BEC).",
+                "Fake Invoice / BEC Indicators", 10,
+                "Email references invoices or payment due dates. Common in legitimate billing; "
+                "treat as phishing only with corroborating spoofing or malware evidence.",
                 f"Matched Phrase: '{match.group(0)}'",
-                strength="strong",
+                strength="weak",
             ))
             break
 
@@ -1198,11 +1205,20 @@ def score_message(
 
     if auth.inconsistencies:
         for inc in auth.inconsistencies:
+            # Live vs attributed AR "verification mismatch" is reconstruction noise,
+            # not proof of forgery — keep weak. Hard conflicts stay strong.
+            soft = "verification mismatch" in (inc or "").lower()
             signals.append(_make_signal(
-                "Authentication Inconsistency", 20,
-                "Detected conflicting authentication headers or domain misalignment.",
+                "Authentication Inconsistency",
+                8 if soft else 20,
+                (
+                    "Attributed Authentication-Results disagree with live re-check; "
+                    "often caused by Received-IP reconstruction limits, not spoofing."
+                    if soft else
+                    "Detected conflicting authentication headers or domain misalignment."
+                ),
                 inc,
-                strength="strong",
+                strength="weak" if soft else "strong",
             ))
 
     # --- Header Forensics Signals ---
@@ -1224,7 +1240,18 @@ def score_message(
                 if any(k in title_lc for k in ("lookalike", "typosquat", "impersonation", "spoofing")):
                     w, strength = 25, "strong"
                 elif "high-risk top-level" in title_lc or "raw ip" in title_lc:
-                    w, strength = 20, "strong"
+                    if "raw ip" in title_lc:
+                        w, strength = 20, "strong"
+                    else:
+                        evidence_lc = (hf.evidence or "").lower()
+                        core = any(
+                            f".{t}" in evidence_lc or f"'.{t}'" in evidence_lc
+                            for t in CORE_ABUSE_TLDS
+                        )
+                        if core:
+                            w, strength = 20, "strong"
+                        else:
+                            w, strength = 10, "weak"
                 elif "reply-to" in title_lc or "return-path" in title_lc or "sender domain difference" in title_lc:
                     # Org/header domain differences without deception evidence.
                     w, strength = 8, "weak"
