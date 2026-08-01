@@ -45,7 +45,7 @@ export default function Layout() {
               <Clock className="w-4 h-4" /> Analysis History
             </NavLink>
             <NavLink to="/about" className={navLinkClass}>
-              <Info className="w-4 h-4" /> System Architecture
+              <Info className="w-4 h-4" /> About
             </NavLink>
           </nav>
         </div>
@@ -53,6 +53,11 @@ export default function Layout() {
         <div className="p-4 border-t border-emerald-950">
           <div className="px-3 pb-3 mb-2 border-b border-emerald-950/50">
             <p className="text-[10px] font-mono text-slate-500 uppercase">Logged in as</p>
+            {user?.full_name ? (
+              <p className="text-xs font-bold text-slate-200 truncate" title={user.full_name}>
+                {user.full_name}
+              </p>
+            ) : null}
             <p className="text-xs font-bold text-slate-300 truncate" title={user?.email}>{user?.email}</p>
           </div>
           <button onClick={logoutUser} className="w-full px-3.5 py-2.5 rounded-xl text-xs font-bold flex items-center gap-3 text-red-400 hover:bg-red-950/30 transition">

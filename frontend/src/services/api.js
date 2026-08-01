@@ -27,11 +27,11 @@ export const login = async (email, password) => {
   return handleResponse(response);
 };
 
-export const signup = async (email, password) => {
+export const signup = async (email, password, fullName = '') => {
   const response = await fetch(`${API_BASE}/api/auth/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, full_name: fullName || undefined }),
   });
   return handleResponse(response);
 };
