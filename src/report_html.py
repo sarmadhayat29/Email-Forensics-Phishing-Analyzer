@@ -183,7 +183,7 @@ def write_html_report(finding: Finding, out_path: str) -> None:
   <!-- 13 Core Investigation Sections -->
   <details open>
     <summary>5. Authentication Analysis (SPF / DKIM / DMARC)</summary>
-    <div class="section-content">{_render_auth(finding)}</div>
+    <div class="section-content">{_render_auth(finding)}{_render_domain_age(finding)}</div>
   </details>
 
   <details open>
@@ -211,7 +211,7 @@ def write_html_report(finding: Finding, out_path: str) -> None:
 
   <details open>
     <summary>10. Triggered Phishing Threat Indicators ({len(finding.signals)} Signals)</summary>
-    <div class="section-content">{_render_signals(finding)}</div>
+    <div class="section-content">{_render_signals(finding)}{_render_html_forensics(finding)}</div>
   </details>
 
   <details open>
@@ -277,7 +277,17 @@ def _render_auth(finding: Finding) -> str:
     if auth.inconsistencies:
         inconsistencies_html = "<div style='margin-top: 1rem;'><strong style='color:#fca5a5;'>Authentication Anomalies Detected:</strong><ul>" + "".join(f"<li>⚠️ {_escape(inc)}</li>" for inc in auth.inconsistencies) + "</ul></div>"
 
-    return f"""<table>
+    provenance_html = ""
+    checks = getattr(auth, "live_checks", None) or []
+    if checks:
+        provenance_html = (
+            "<div style='margin-top: 1rem;'><strong>Result Provenance:</strong><ul>"
+            + "".join(f"<li>{_escape(check)}</li>" for check in checks)
+            + "</ul></div>"
+        )
+
+    return f"""<div style="margin-bottom: 0.75rem;"><strong>Evidence Source:</strong> {_escape(auth.source or '-')}</div>
+    <table>
       <tr><th>Mechanism</th><th>Verdict</th><th>Extracted Details</th></tr>
       <tr><td><strong>SPF</strong></td><td><span class="badge" style="{spf_b}">{auth.spf.upper()}</span></td><td>{_escape(auth.spf_details or '-')}</td></tr>
       <tr><td><strong>DKIM</strong></td><td><span class="badge" style="{dkim_b}">{auth.dkim.upper()}</span></td><td>{_escape(auth.dkim_details or '-')}</td></tr>
@@ -286,7 +296,50 @@ def _render_auth(finding: Finding) -> str:
     <div style="margin-top: 1rem;">
       <strong>SOC Analysis Summary:</strong> {_escape(auth.explanation)}
     </div>
+    {provenance_html}
     {inconsistencies_html}"""
+
+
+DOMAIN_AGE_BADGES = {
+    "newly_registered": ("High", "NEWLY REGISTERED"),
+    "young": ("Medium", "RECENT"),
+    "established": ("Safe", "ESTABLISHED"),
+    "exempt": ("Safe", "BRAND-OWNED"),
+    "unknown": ("NONE", "UNKNOWN"),
+}
+
+
+def _render_domain_age(finding: Finding) -> str:
+    """Registration-age evidence, rendered under the authentication section."""
+    findings = getattr(finding, "domain_age", None) or []
+    if not findings:
+        return ""
+
+    rows = ""
+    for entry in findings:
+        badge_key, label = DOMAIN_AGE_BADGES.get(
+            getattr(entry, "classification", "unknown"), DOMAIN_AGE_BADGES["unknown"]
+        )
+        age = f"{entry.age_days} days" if getattr(entry, "age_days", None) is not None else "-"
+        rows += f"""<tr>
+          <td><code>{_escape(entry.domain)}</code></td>
+          <td>{_escape((getattr(entry, 'origin', '') or '-').title())}</td>
+          <td><span class="badge" style="{BADGE_STYLES.get(badge_key, BADGE_STYLES['NONE'])}">{label}</span></td>
+          <td>{_escape(entry.created or '-')}</td>
+          <td>{_escape(age)}</td>
+          <td>{_escape(entry.detail or '-')}</td>
+        </tr>"""
+
+    return f"""<div style="margin-top: 1.5rem;">
+      <strong>Domain Registration Age (WHOIS)</strong>
+      <p style="color: var(--text-muted); margin: 0.35rem 0 0.75rem;">
+        <small>A lookup that could not be completed is reported as UNKNOWN and carries no risk weight.</small>
+      </p>
+      <table>
+        <tr><th>Domain</th><th>Seen As</th><th>Assessment</th><th>Registered</th><th>Age</th><th>Detail</th></tr>
+        {rows}
+      </table>
+    </div>"""
 
 
 def _render_routing(finding: Finding) -> str:
@@ -336,6 +389,38 @@ def _render_signals(finding: Finding) -> str:
       <tr><th>Indicator</th><th>Points</th><th>Explanation</th><th>Supporting Evidence</th></tr>
       {signal_rows}
     </table>"""
+
+
+def _render_html_forensics(finding: Finding) -> str:
+    """Structural HTML body threats, rendered under the phishing indicators."""
+    findings = getattr(finding, "html_findings", None) or []
+    if not findings:
+        return ""
+
+    rows = ""
+    for entry in findings:
+        severity = getattr(entry, "severity", "Medium") or "Medium"
+        detail = getattr(entry, "detail", "")
+        detail_html = f"<br><small style='color: var(--text-muted);'>{_escape(detail)}</small>" if detail else ""
+        rows += f"""<tr>
+          <td><span class="badge" style="{BADGE_STYLES.get(severity, BADGE_STYLES['NONE'])}">{_escape(severity)}</span></td>
+          <td><strong>{_escape(entry.indicator)}</strong></td>
+          <td>{_escape(getattr(entry, 'explanation', ''))}{detail_html}</td>
+          <td><code>{_escape(getattr(entry, 'evidence', '-') or '-')}</code></td>
+        </tr>"""
+
+    return f"""<div style="margin-top: 1.5rem;">
+      <strong>HTML Body Forensics ({len(findings)} Structural Finding(s))</strong>
+      <p style="color: var(--text-muted); margin: 0.35rem 0 0.75rem;">
+        <small>Threats found in the markup itself: cloaked text, in-body credential forms, active
+        content and automatic redirects. The combined risk weight of this family is capped, and
+        preheader-length hidden text is reported as Low because bulk senders use it legitimately.</small>
+      </p>
+      <table>
+        <tr><th>Severity</th><th>Detection</th><th>Explanation</th><th>Evidence</th></tr>
+        {rows}
+      </table>
+    </div>"""
 
 
 def _render_url_analysis(url_analysis) -> str:
@@ -391,6 +476,8 @@ def _render_master_evidence(finding: Finding) -> str:
         evidence_items.append((s.indicator, getattr(s, 'evidence', s.detail), "Phishing Signal"))
     for hf in finding.header_findings:
         evidence_items.append((hf.title, hf.evidence, "Header Forensics"))
+    for entry in getattr(finding, "html_findings", None) or []:
+        evidence_items.append((entry.indicator, getattr(entry, "evidence", ""), "HTML Body Forensics"))
     for u in finding.url_analysis.urls:
         if u.findings:
             evidence_items.append((f"URL: {u.domain}", f"{'; '.join(u.findings)} (URL: {u.raw_url})", "URL Forensics"))

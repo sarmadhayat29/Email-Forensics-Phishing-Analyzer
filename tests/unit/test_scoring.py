@@ -261,6 +261,36 @@ class TestConfidence(unittest.TestCase):
         self.assertEqual(verdict.confidence_label, "Insufficient evidence")
 
 
+class TestConfidenceWithLiveVerification(unittest.TestCase):
+    """Independently re-verified authentication is stronger evidence than a claim."""
+
+    def _score(self, **auth_kwargs):
+        parsed = ParsedMessage(from_raw="a@b.com", body_plain="Hello there.")
+        auth = AuthVerdict(raw="", source="", spf="pass", dkim="pass", dmarc="pass", **auth_kwargs)
+        return score_message(parsed, auth, RoutingVerdict(hop_count=3))
+
+    def test_live_verified_beats_header_only(self):
+        live = self._score(live_attempted=True, live_verified=True)
+        header_only = self._score()
+        self.assertGreaterEqual(live.confidence, header_only.confidence)
+
+    def test_failed_live_attempt_lowers_confidence(self):
+        failed = self._score(live_attempted=True, live_verified=False)
+        header_only = self._score()
+        self.assertLess(failed.confidence, header_only.confidence)
+        self.assertIn("independently re-verified authentication", failed.confidence_label)
+
+    def test_confidence_stays_within_bounds(self):
+        for kwargs in ({}, {"live_attempted": True, "live_verified": True},
+                       {"live_attempted": True, "live_verified": False}):
+            verdict = self._score(**kwargs)
+            self.assertTrue(0 < verdict.confidence <= 90)
+
+    def test_offline_deployment_is_not_penalised(self):
+        """live_attempted=False (air-gapped) must score as it always has."""
+        self.assertEqual(self._score().confidence, 90)
+
+
 if __name__ == '__main__':
     unittest.main()
 

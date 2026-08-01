@@ -17,6 +17,8 @@ from header_analysis import analyze_headers
 from url_analysis import analyze_urls
 from attachment_analysis import analyze_attachments
 from auth_checks import analyse_authentication, live_reverify
+from domain_age import analyse_domain_age
+from html_analysis import analyse_html
 from routing import analyse_routing
 from scoring import score_message
 from report import build_finding, write_html_report, write_json_report, write_pdf_report
@@ -57,12 +59,23 @@ class AnalyzerPipeline:
         
         # Phase 5: Routing
         routing = analyse_routing(parsed)
-        
+
+        # Phase 5.5: Domain reputation (WHOIS registration age).
+        # Degrades to an empty list whenever WHOIS is disabled or unreachable.
+        domain_age_findings = analyse_domain_age(parsed, url_verdict)
+
+        # Phase 5.6: HTML body forensics (hidden text, in-body forms, active
+        # content). Returns an empty list when there is no HTML part or when
+        # the markup could not be analysed; it never raises.
+        html_findings = analyse_html(parsed.body_html, parsed.body_plain)
+
         # Phase 6: Scoring
-        scoring = score_message(parsed, auth, routing, header_verdict, url_verdict)
+        scoring = score_message(parsed, auth, routing, header_verdict, url_verdict,
+                                domain_age_findings, html_findings)
         
         # Phase 7: Finding assembly
-        finding = build_finding(path, parsed, auth, routing, scoring, header_verdict, url_verdict)
+        finding = build_finding(path, parsed, auth, routing, scoring, header_verdict,
+                                url_verdict, domain_age_findings, html_findings)
         return finding
 
 

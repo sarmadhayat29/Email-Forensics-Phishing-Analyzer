@@ -8,6 +8,7 @@ from email.message import Message
 
 from utils import hash_bytes, sniff_true_type, file_extension
 from models import ParsedMessage, Attachment
+from ingest import RAW_BYTES_ATTR
 from exceptions import ParsingError
 from logger import get_logger
 
@@ -45,10 +46,22 @@ def parse_message(msg: Message) -> ParsedMessage:
             mime_structure=mime_structure,
             attachments=attachments,
             embedded_images=embedded_images,
+            raw_bytes=_raw_source_bytes(msg),
         )
     except Exception as e:
         logger.error(f"Failed to parse message: {e}")
         raise ParsingError(f"Failed to parse message structure: {e}") from e
+
+
+def _raw_source_bytes(msg: Message) -> bytes:
+    """Original file bytes if ingest preserved them, else empty.
+
+    Deliberately does not fall back to ``msg.as_bytes()``: re-serialising a
+    message changes line endings and folding, which would make a perfectly good
+    DKIM signature look forged.
+    """
+    raw = getattr(msg, RAW_BYTES_ATTR, b"")
+    return bytes(raw) if isinstance(raw, (bytes, bytearray)) else b""
 
 
 def _build_mime_structure(msg: Message, level: int = 0) -> str:

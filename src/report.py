@@ -15,7 +15,8 @@ from typing import Optional, List
 
 from models import (
     Finding, ParsedMessage, AuthVerdict, RoutingVerdict,
-    ScoringVerdict, HeaderAnalysisVerdict, HeaderFinding, URLAnalysisVerdict
+    ScoringVerdict, HeaderAnalysisVerdict, HeaderFinding, URLAnalysisVerdict,
+    DomainAgeFinding, HtmlFinding,
 )
 from logger import get_logger
 
@@ -32,7 +33,9 @@ def build_finding(
     routing: RoutingVerdict,
     scoring: ScoringVerdict,
     header_verdict: Optional[HeaderAnalysisVerdict] = None,
-    url_verdict: Optional[URLAnalysisVerdict] = None
+    url_verdict: Optional[URLAnalysisVerdict] = None,
+    domain_age_findings: Optional[List[DomainAgeFinding]] = None,
+    html_findings: Optional[List[HtmlFinding]] = None,
 ) -> Finding:
     return Finding(
         file=os.path.basename(path),
@@ -59,6 +62,8 @@ def build_finding(
         raw_score=scoring.total_score,
         confidence=scoring.confidence,
         confidence_label=scoring.confidence_label,
+        domain_age=list(domain_age_findings or []),
+        html_findings=list(html_findings or []),
     )
 
 

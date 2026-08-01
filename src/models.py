@@ -95,6 +95,65 @@ class AuthVerdict:
     explanation: str = ""
     inconsistencies: list[str] = field(default_factory=list)
     note: Optional[str] = None
+    #: True when live re-verification was attempted for this message, whether or
+    #: not it succeeded; ``live_verified`` is True only when at least one
+    #: mechanism was independently confirmed against DNS / the signature.
+    live_attempted: bool = False
+    live_verified: bool = False
+    #: Per-mechanism provenance lines ("live-verified" vs "header-derived").
+    live_checks: list[str] = field(default_factory=list)
+    #: DMARC ``p=`` (or ``sp=``) policy when a record was read live.
+    dmarc_policy: Optional[str] = None
+
+
+@dataclass
+class DomainAgeFinding:
+    """Registration age of one domain observed in a message.
+
+    ``classification`` is the only field scoring reads:
+
+    * ``newly_registered`` — younger than ``NRD_DAYS``
+    * ``young``            — younger than ``YOUNG_DOMAIN_DAYS``
+    * ``established``      — older than that
+    * ``exempt``           — brand-owned, so never looked up or scored
+    * ``unknown``          — disabled, skipped, or the lookup did not answer;
+      explicitly *not* evidence of anything.
+    """
+    domain: str
+    classification: str = "unknown"
+    age_days: Optional[int] = None
+    created: Optional[str] = None
+    registrar: str = ""
+    #: Where the domain was seen: "sender" (header From) or "link" (URL host).
+    origin: str = "sender"
+    #: Provenance of the answer: whois / cache / exempt / disabled / skipped / error.
+    source: str = ""
+    detail: str = ""
+
+    @property
+    def resolved(self) -> bool:
+        """True when a registration date was actually established."""
+        return self.age_days is not None
+
+
+@dataclass
+class HtmlFinding:
+    """One structural threat observed in the HTML part of a message body.
+
+    ``category`` is the only field scoring reads; it is a stable machine key
+    from :mod:`html_analysis` (``hidden_text``, ``credential_form``, ...).
+    ``severity`` grades the same category by how strongly it indicates abuse,
+    so a preheader-length hidden block and a filter-poisoning one are the same
+    category at different severities.
+    """
+    category: str
+    indicator: str
+    severity: str = "Medium"  # High | Medium | Low
+    #: Truncated snippet of the offending markup or text.
+    evidence: str = ""
+    explanation: str = ""
+    #: Supplementary measurement or threshold note for the analyst.
+    detail: str = ""
 
 
 @dataclass
@@ -163,6 +222,11 @@ class ParsedMessage:
     mime_structure: str = ""
     attachments: list[Attachment] = field(default_factory=list)
     embedded_images: list[Attachment] = field(default_factory=list)
+    #: Untouched bytes of the source file, when the ingest stage could preserve
+    #: them. Required for DKIM verification, which is byte-exact — a
+    #: re-serialised message would produce a bogus body hash. Never part of a
+    #: Finding, so reports and API payloads stay JSON-serialisable.
+    raw_bytes: bytes = b""
 
 
 @dataclass
@@ -207,6 +271,10 @@ class Finding:
     raw_score: int = 0
     confidence: Optional[int] = None
     confidence_label: str = "Unknown"
+    #: Registration age of the sender and linked domains, when WHOIS answered.
+    domain_age: list[DomainAgeFinding] = field(default_factory=list)
+    #: Structural threats found in the HTML body, when one was present.
+    html_findings: list[HtmlFinding] = field(default_factory=list)
 
 
 

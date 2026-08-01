@@ -15,15 +15,25 @@ from logger import get_logger
 
 logger = get_logger(__name__)
 
+#: Attribute under which the pristine source bytes are stashed on the parsed
+#: Message. DKIM verification hashes the message byte-for-byte, so it needs the
+#: original octets rather than a re-serialised copy.
+RAW_BYTES_ATTR = "_raw_source_bytes"
+
 
 def load_eml(path: str) -> Message:
     logger.debug(f"Loading .eml file: {path}")
     try:
         with open(path, "rb") as f:
-            msg = email.message_from_binary_file(f, policy=policy.default)
-            if not msg:
-                raise MalformedEmailError(f"File {path} is empty or unparsable.")
-            return msg
+            raw = f.read()
+        msg = email.message_from_bytes(raw, policy=policy.default)
+        if not msg:
+            raise MalformedEmailError(f"File {path} is empty or unparsable.")
+        try:
+            setattr(msg, RAW_BYTES_ATTR, raw)
+        except Exception:  # pragma: no cover - Message always accepts attributes
+            logger.debug("Could not attach raw source bytes; DKIM re-verification will be skipped.")
+        return msg
     except OSError as e:
         logger.error(f"Failed to read file {path}: {e}")
         raise IngestionError(f"Cannot read file {path}: {e}") from e

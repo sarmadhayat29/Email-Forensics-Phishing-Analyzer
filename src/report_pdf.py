@@ -224,6 +224,12 @@ def write_pdf_report(finding: Finding, out_path: str) -> None:
         ev_data.append([Paragraph("Phishing Signal", body_style), Paragraph(_x(s.indicator), body_style), Paragraph(_x(s.evidence) or '-', code_style)])
     for hf in finding.header_findings:
         ev_data.append([Paragraph("Header Forensics", body_style), Paragraph(_x(hf.title), body_style), Paragraph(_x(hf.evidence), code_style)])
+    for entry in getattr(finding, "html_findings", None) or []:
+        ev_data.append([
+            Paragraph("HTML Body Forensics", body_style),
+            Paragraph(f"[{_x(getattr(entry, 'severity', ''))}] {_x(entry.indicator)}", body_style),
+            Paragraph(_x(getattr(entry, 'evidence', '')) or '-', code_style),
+        ])
 
     t_ev = Table(ev_data, colWidths=[110, 170, 260])
     t_ev.setStyle(TableStyle([

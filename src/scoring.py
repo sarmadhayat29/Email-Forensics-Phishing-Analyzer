@@ -6,7 +6,15 @@ transparent, weighted risk signals with evidence for SOC analysts.
 
 import re
 from typing import Optional, List
-from models import ParsedMessage, AuthVerdict, RoutingVerdict, PhishingSignal, ScoringVerdict, HeaderAnalysisVerdict, URLAnalysisVerdict
+from models import (
+    ParsedMessage, AuthVerdict, RoutingVerdict, PhishingSignal, ScoringVerdict,
+    HeaderAnalysisVerdict, URLAnalysisVerdict, DomainAgeFinding, HtmlFinding,
+)
+from html_analysis import (
+    ACTIVE_CONTENT, COMMENT_OBFUSCATION, CREDENTIAL_FORM, DATA_URI_HTML, DATA_URI_OTHER,
+    ENTITY_OBFUSCATION, EVENT_HANDLER, FORM_CREDENTIAL_FIELDS, FORM_EXTERNAL_ACTION,
+    HIDDEN_TEXT, IFRAME, IMAGE_ONLY_BODY, JAVASCRIPT_URI, META_REFRESH, SCRIPT,
+)
 from utils import (
     extract_domain, extract_address, extract_display_name,
     looks_like_lookalike, is_punycode_or_unicode,
@@ -93,10 +101,16 @@ def to_display_score(raw_score: int) -> int:
 # three authentication signals count as one line of evidence rather than three.
 # Evaluated in order; the first matching family wins.
 SIGNAL_FAMILIES = [
+    # Must precede the families below: an HTML indicator may mention a form or
+    # a redirect but belongs to body forensics, not to those families.
+    ("html body forensics", ("html forensics",)),
     ("header forensics", ("header forensics",)),
     ("routing forensics", ("routing forensics",)),
     ("attachment forensics", ("attachment",)),
     ("authentication", ("spf", "dkim", "dmarc", "authentication")),
+    # Must precede "link forensics": a linked-domain age indicator says "link"
+    # but belongs to the reputation family, not to link analysis.
+    ("domain reputation", ("domain reputation",)),
     ("link forensics", ("link", "hyperlink", "redirect", "shortener")),
     ("sender identity", ("display name", "lookalike", "typosquat", "top-level domain",
                          "punycode", "mismatched sender")),
@@ -129,14 +143,16 @@ def assess_confidence(
     auth: AuthVerdict,
     routing: RoutingVerdict,
     signals: List[PhishingSignal],
+    domain_age_findings: Optional[List[DomainAgeFinding]] = None,
+    html_findings: Optional[List[HtmlFinding]] = None,
 ) -> tuple[Optional[int], str]:
     """Estimate how much verifiable evidence backs the verdict.
 
     This is a measure of *evidence coverage*, not of threat severity: it answers
     "how much did we have to work with", for a clean verdict as much as for a
-    malicious one. It is deliberately capped at 90 because this engine is purely
-    offline and can never be certain. Returns ``(None, ...)`` when there was
-    effectively nothing to analyse.
+    malicious one. It is deliberately capped at 90 because even live DNS
+    re-verification cannot establish intent. Returns ``(None, ...)`` when there
+    was effectively nothing to analyse.
     """
     factors: List[tuple[str, bool]] = [
         (
@@ -147,6 +163,32 @@ def assess_confidence(
         ("verifiable routing chain", bool(routing) and routing.hop_count >= 2),
         ("message body", bool(parsed.body_plain or parsed.body_html)),
     ]
+
+    # Independently re-verified authentication is materially stronger evidence
+    # than a relay's own claim about itself. The factor is only weighed when
+    # live re-verification actually ran, so a deliberately offline deployment is
+    # not penalised for a check it never attempted.
+    if getattr(auth, "live_attempted", False):
+        factors.append(("independently re-verified authentication (live DNS/DKIM)",
+                        bool(getattr(auth, "live_verified", False))))
+
+    # A resolved registration date is externally verifiable evidence, so it
+    # raises coverage. As with live auth the factor is only weighed when the
+    # check actually ran, so an offline deployment is not penalised for it.
+    if domain_age_findings:
+        assessable = [f for f in domain_age_findings if getattr(f, "source", "") != "disabled"]
+        if assessable:
+            factors.append((
+                "domain registration age (WHOIS)",
+                any(getattr(f, "age_days", None) is not None for f in assessable),
+            ))
+
+    # A body that was structurally analysed is better covered than one read as
+    # flat text. The factor is only added when the analysis actually ran on an
+    # HTML part, so it can raise coverage but never penalise a plain-text
+    # message or a caller that does not run the stage.
+    if html_findings is not None and parsed.body_html:
+        factors.append(("structural analysis of the HTML body", True))
 
     # Corroboration only applies when something actually fired; a message with
     # no indicators is not "less certain" for lacking them.
@@ -293,6 +335,171 @@ def _score_routing_flags(routing: RoutingVerdict) -> List[PhishingSignal]:
 
 
 
+# --- Domain reputation (registration age) --------------------------------
+#
+# WHOIS age is corroborating evidence, never a verdict. Three deliberate
+# safeguards keep an unknown or newly registered domain from dominating:
+#
+#   * only *resolved* ages score — a failed, disabled or rate-limited lookup
+#     contributes nothing, because "we could not ask" is not "guilty";
+#   * a sender-domain hit outweighs a linked-domain hit, since the From domain
+#     is the identity being asserted;
+#   * the family total is capped, so a message linking twelve fresh domains
+#     scores the same as one linking two.
+#
+# A newly registered *sender* domain (25) plus a hard SPF or DKIM failure (30)
+# lands mid-High rather than Critical, which is the intended balance.
+DOMAIN_AGE_WEIGHTS = {
+    ("sender", "newly_registered"): (
+        25, "Newly Registered Sender Domain",
+        "The sender's domain was registered within the newly-registered-domain window. "
+        "Disposable domains registered days before use are a hallmark of phishing infrastructure.",
+    ),
+    ("sender", "young"): (
+        12, "Recently Registered Sender Domain",
+        "The sender's domain is young. Legitimate correspondents usually write from long-established "
+        "domains, so this warrants corroboration rather than action on its own.",
+    ),
+    ("link", "newly_registered"): (
+        15, "Newly Registered Link Domain",
+        "A link in the message points at a domain registered within the newly-registered-domain window, "
+        "typical of throwaway credential-harvesting infrastructure.",
+    ),
+    ("link", "young"): (
+        8, "Recently Registered Link Domain",
+        "A link in the message points at a recently registered domain.",
+    ),
+}
+
+#: Hard ceiling on the combined weight of all domain-age signals.
+MAX_DOMAIN_AGE_SCORE = 30
+#: At most this many domain-age signals are reported, strongest first.
+MAX_DOMAIN_AGE_SIGNALS = 2
+
+
+def _score_domain_age(findings: Optional[List[DomainAgeFinding]]) -> List[PhishingSignal]:
+    if not findings:
+        return []
+
+    candidates: List[tuple[int, PhishingSignal]] = []
+    for finding in findings:
+        if getattr(finding, "age_days", None) is None:
+            continue  # unknown / exempt / failed lookup: no penalty
+        origin = "link" if getattr(finding, "origin", "sender") == "link" else "sender"
+        rule = DOMAIN_AGE_WEIGHTS.get((origin, getattr(finding, "classification", "")))
+        if not rule:
+            continue
+        weight, indicator, explanation = rule
+        evidence = f"Domain: '{finding.domain}' | Registered: {finding.created or 'unknown'} " \
+                   f"| Age: {finding.age_days} day(s)"
+        if getattr(finding, "registrar", ""):
+            evidence += f" | Registrar: {finding.registrar}"
+        candidates.append((weight, PhishingSignal(
+            indicator=f"Domain Reputation: {indicator}",
+            weight=weight,
+            explanation=explanation,
+            evidence=evidence,
+        )))
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+
+    signals: List[PhishingSignal] = []
+    budget = MAX_DOMAIN_AGE_SCORE
+    for weight, signal in candidates[:MAX_DOMAIN_AGE_SIGNALS]:
+        if budget <= 0:
+            break
+        if weight > budget:
+            signal.weight = budget
+        budget -= signal.weight
+        signals.append(signal)
+    return signals
+
+
+# --- HTML body forensics -------------------------------------------------
+#
+# Structural HTML threats are strong evidence, but the family is capped for the
+# same reason routing and reputation are: a single stage must not be able to
+# decide a verdict on its own. Two properties keep the cap honest:
+#
+#   * weights are graded by severity, so a preheader-length hidden block (Low)
+#     costs 4 while a filter-poisoning one (High) costs 20;
+#   * the family total is capped and only the strongest few signals are
+#     reported, so a heavily templated marketing message that trips several
+#     soft detectors cannot accumulate its way into Critical.
+#
+# A password form (30) plus a hard SPF failure (30) lands in High, which is the
+# intended balance: an in-body credential form is close to conclusive on its
+# own, but still needs corroboration to reach the top of the scale.
+HTML_SIGNAL_WEIGHTS: dict[str, dict[str, int]] = {
+    CREDENTIAL_FORM: {"High": 30, "Medium": 18},
+    DATA_URI_HTML: {"High": 25},
+    META_REFRESH: {"High": 22},
+    JAVASCRIPT_URI: {"High": 20},
+    HIDDEN_TEXT: {"High": 20, "Medium": 10, "Low": 4},
+    IFRAME: {"High": 20, "Medium": 15},
+    FORM_EXTERNAL_ACTION: {"Medium": 15},
+    SCRIPT: {"Medium": 12},
+    ACTIVE_CONTENT: {"Medium": 12},
+    FORM_CREDENTIAL_FIELDS: {"Medium": 12},
+    COMMENT_OBFUSCATION: {"Medium": 12},
+    DATA_URI_OTHER: {"Medium": 10},
+    ENTITY_OBFUSCATION: {"Medium": 8},
+    EVENT_HANDLER: {"Medium": 8},
+    IMAGE_ONLY_BODY: {"Low": 5},
+}
+
+#: Applied when a detector reports a severity the table does not list, so a new
+#: detector can never score more than its severity band allows.
+HTML_DEFAULT_WEIGHTS = {"High": 20, "Medium": 10, "Low": 4}
+
+#: Hard ceiling on the combined weight of all HTML body signals.
+MAX_HTML_SCORE = 30
+#: At most this many HTML signals are scored, strongest first.
+MAX_HTML_SIGNALS = 4
+
+
+def _html_weight(category: str, severity: str) -> int:
+    by_severity = HTML_SIGNAL_WEIGHTS.get(category, {})
+    if severity in by_severity:
+        return by_severity[severity]
+    return HTML_DEFAULT_WEIGHTS.get(severity, 0)
+
+
+def _score_html_findings(findings: Optional[List[HtmlFinding]]) -> List[PhishingSignal]:
+    if not findings:
+        return []
+
+    candidates: List[tuple[int, PhishingSignal]] = []
+    for finding in findings:
+        severity = getattr(finding, "severity", "Medium") or "Medium"
+        weight = _html_weight(getattr(finding, "category", ""), severity)
+        if weight <= 0:
+            continue
+        evidence = f"[{severity}] {getattr(finding, 'evidence', '') or '-'}"
+        if getattr(finding, "detail", ""):
+            evidence += f" | {finding.detail}"
+        candidates.append((weight, PhishingSignal(
+            indicator=f"HTML Forensics: {finding.indicator}",
+            weight=weight,
+            explanation=getattr(finding, "explanation", ""),
+            evidence=evidence,
+            severity=severity,
+        )))
+
+    candidates.sort(key=lambda item: item[0], reverse=True)
+
+    signals: List[PhishingSignal] = []
+    budget = MAX_HTML_SCORE
+    for weight, signal in candidates[:MAX_HTML_SIGNALS]:
+        if budget <= 0:
+            break
+        if signal.weight > budget:
+            signal.weight = budget
+        budget -= signal.weight
+        signals.append(signal)
+    return signals
+
+
 def _bucket(display_score: int) -> str:
     if display_score < 0:
         return "Low"
@@ -307,7 +514,9 @@ def score_message(
     auth: AuthVerdict,
     routing: RoutingVerdict,
     header_verdict: Optional[HeaderAnalysisVerdict] = None,
-    url_verdict: Optional[URLAnalysisVerdict] = None
+    url_verdict: Optional[URLAnalysisVerdict] = None,
+    domain_age_findings: Optional[List[DomainAgeFinding]] = None,
+    html_findings: Optional[List[HtmlFinding]] = None,
 ) -> ScoringVerdict:
     logger.debug("Executing 15-category Phishing Indicator Scoring Engine.")
     signals: List[PhishingSignal] = []
@@ -554,6 +763,12 @@ def score_message(
     # --- Routing Forensics Signals ---
     signals.extend(_score_routing_flags(routing))
 
+    # --- Domain Reputation (registration age) ---
+    signals.extend(_score_domain_age(domain_age_findings))
+
+    # --- HTML Body Forensics (capped contribution) ---
+    signals.extend(_score_html_findings(html_findings))
+
     # --- Risky Attachments ---
     # Consumes the flags computed by the Attachment Forensics Engine, falling
     # back to a local re-check when scoring runs before/without that stage.
@@ -597,7 +812,9 @@ def score_message(
 
     total = sum(s.weight for s in signals)
     display = to_display_score(total)
-    confidence, confidence_label = assess_confidence(parsed, auth, routing, signals)
+    confidence, confidence_label = assess_confidence(
+        parsed, auth, routing, signals, domain_age_findings, html_findings
+    )
     logger.info(f"Message scored {display}/100 ({_bucket(display)} risk, raw weight total {total}).")
 
     return ScoringVerdict(
