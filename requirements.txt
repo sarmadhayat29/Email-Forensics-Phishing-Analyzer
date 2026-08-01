@@ -28,3 +28,7 @@ dkimpy>=1.1.0              # DKIM signature verification
 checkdmarc>=5.4.0          # DMARC policy evaluation
 python-whois>=0.9.4        # domain-age lookup for newly-registered-domain signal
 extract-msg>=0.45.0        # Outlook .msg file parsing
+# olefile is soft-imported for OLE/VBA macro detection in legacy Office
+# attachments. It arrives as a transitive dependency of extract-msg and is
+# deliberately not pinned here: when it is absent the inspector falls back to a
+# raw directory scan of the container.

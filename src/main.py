@@ -32,8 +32,18 @@ logger = get_logger(__name__)
 
 
 class AnalyzerPipeline:
-    def __init__(self, output_dir: str):
+    """Runs every analysis stage over one message and assembles the Finding.
+
+    ``sender_history_provider`` is an optional callable taking the parsed message
+    and returning a :class:`~models.SenderHistory` (or ``None``). It exists so
+    the API can contribute per-user correspondence history without the pipeline
+    ever importing the database layer; the CLI passes nothing and stays fully
+    offline. A provider that fails is treated as no history at all.
+    """
+
+    def __init__(self, output_dir: str, sender_history_provider=None):
         self.output_dir = output_dir
+        self.sender_history_provider = sender_history_provider
         os.makedirs(self.output_dir, exist_ok=True)
 
     def analyse_one(self, path: str) -> Finding:
@@ -69,14 +79,27 @@ class AnalyzerPipeline:
         # the markup could not be analysed; it never raises.
         html_findings = analyse_html(parsed.body_html, parsed.body_plain)
 
+        # Phase 5.7: Sender-history baselining, when a caller supplied a source
+        # of prior correspondence for this recipient (API only).
+        sender_history = self._sender_history(parsed)
+
         # Phase 6: Scoring
         scoring = score_message(parsed, auth, routing, header_verdict, url_verdict,
-                                domain_age_findings, html_findings)
+                                domain_age_findings, html_findings, sender_history)
         
         # Phase 7: Finding assembly
         finding = build_finding(path, parsed, auth, routing, scoring, header_verdict,
                                 url_verdict, domain_age_findings, html_findings)
         return finding
+
+    def _sender_history(self, parsed):
+        if not self.sender_history_provider:
+            return None
+        try:
+            return self.sender_history_provider(parsed)
+        except Exception as e:  # a history source must never break an analysis
+            logger.warning(f"Sender-history provider failed and was skipped: {e}")
+            return None
 
 
 

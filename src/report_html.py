@@ -371,6 +371,20 @@ def _render_routing(finding: Finding) -> str:
     </div>"""
 
 
+def _weight_badge(weight: int) -> str:
+    """Points contributed by one signal.
+
+    A signal whose evidence family already reached its risk cap contributes
+    nothing but is still listed, so the analyst sees the observation and knows
+    why it did not move the score.
+    """
+    if not weight or weight <= 0:
+        return ('<span class="badge" style="background:#1f2937; color:#9ca3af;" '
+                'title="Reported for context: this evidence family had already reached its '
+                'risk cap, so this signal adds no points.">CAPPED</span>')
+    return f'<span class="badge" style="background:#991b1b; color:#fecaca;">+{weight}</span>'
+
+
 def _render_signals(finding: Finding) -> str:
     if not finding.signals:
         return "<p style='color: var(--text-muted);'><em>No phishing indicators triggered.</em></p>"
@@ -378,7 +392,7 @@ def _render_signals(finding: Finding) -> str:
     signal_rows = "".join(
         f"""<tr>
           <td><strong>{_escape(getattr(s, 'indicator', s.signal))}</strong></td>
-          <td><span class="badge" style="background:#991b1b; color:#fecaca;">+{s.weight}</span></td>
+          <td>{_weight_badge(getattr(s, 'weight', 0))}</td>
           <td>{_escape(getattr(s, 'explanation', s.detail))}</td>
           <td><code>{_escape(getattr(s, 'evidence', '-'))}</code></td>
         </tr>"""

@@ -12,6 +12,7 @@ from main import AnalyzerPipeline
 from report import write_html_report, write_json_report, write_pdf_report
 from models import Finding
 from logger import get_logger
+from sender_history import MAX_PRIOR_ROWS, history_provider, senders_from_records
 from db import AnalysisRecord, User
 from api.dependencies import get_db, require_current_user
 from api.utils import sanitize_filename
@@ -19,6 +20,30 @@ from api.security import upload_limiter
 
 logger = get_logger(__name__)
 router = APIRouter()
+
+
+def _sender_history_provider(db: Session, user_id: str, current_file_id: str):
+    """Build the pipeline's optional sender-history provider for this user.
+
+    Only the extracted ``from_addr`` is selected, never the whole finding
+    document, so the baseline costs one indexed query returning a few hundred
+    short strings. The record for the message being analysed is excluded so a
+    message can never count as its own history.
+    """
+    def load_prior_senders():
+        rows = (
+            db.query(AnalysisRecord.finding_json["from_addr"].astext)
+            .filter(
+                AnalysisRecord.user_id == user_id,
+                AnalysisRecord.id != current_file_id,
+            )
+            .order_by(AnalysisRecord.created_at.desc())
+            .limit(MAX_PRIOR_ROWS)
+            .all()
+        )
+        return senders_from_records(rows)
+
+    return history_provider(load_prior_senders)
 
 @router.post("/upload", dependencies=[Depends(upload_limiter)])
 async def upload_email(
@@ -113,7 +138,10 @@ def analyze_email(
 
     success = False
     try:
-        pipeline = AnalyzerPipeline(output_dir=out_dir)
+        pipeline = AnalyzerPipeline(
+            output_dir=out_dir,
+            sender_history_provider=_sender_history_provider(db, current_user.id, file_id),
+        )
         finding: Finding = pipeline.analyse_one(target_path)
 
         html_out = os.path.join(out_dir, "report.html")
