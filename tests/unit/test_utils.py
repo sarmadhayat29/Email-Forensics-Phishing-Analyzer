@@ -15,6 +15,7 @@ from utils import (
     HIGH_RISK_TLDS,
     RISKY_EXTENSIONS,
     SHORTENER_DOMAINS,
+    sniff_true_type,
 )
 
 
@@ -140,6 +141,37 @@ class TestSharedConstants(unittest.TestCase):
             self.assertIn(ext, RISKY_EXTENSIONS)
         for host in {"bit.ly", "cutt.ly", "rebrand.ly", "shorturl.at", "rb.gy"}:
             self.assertIn(host, SHORTENER_DOMAINS)
+
+
+class TestSignatureSniffing(unittest.TestCase):
+
+    def test_original_signatures_are_unchanged(self):
+        for data, expected in (
+            (b"MZ\x90\x00", "exe"),
+            (b"%PDF-1.7", "pdf"),
+            (b"PK\x03\x04\x14\x00", "zip/office"),
+            (b"\xff\xd8\xff\xe0", "jpg"),
+            (b"\x89PNG\r\n", "png"),
+            (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1", "ole/doc-xls-ppt"),
+        ):
+            self.assertEqual(sniff_true_type(data), expected)
+
+    def test_loader_and_container_formats_are_recognised(self):
+        for data, expected in (
+            (b"{\\rtf1\\ansi", "rtf"),
+            (b"7z\xbc\xaf\x27\x1c", "7z"),
+            (b"Rar!\x1a\x07\x00", "rar"),
+            (b"Rar!\x1a\x07\x01\x00", "rar"),
+            (b"MSCF\x00\x00\x00\x00", "cab"),
+            (b"\x7fELF\x02\x01\x01", "elf"),
+            (b"GIF89a", "gif"),
+            (b"\x4c\x00\x00\x00\x01\x14\x02\x00" + b"\x00" * 8, "lnk"),
+        ):
+            self.assertEqual(sniff_true_type(data), expected)
+
+    def test_unrecognised_content_stays_unknown(self):
+        for data in (b"", b"hello world", b"\x00\x01\x02\x03"):
+            self.assertEqual(sniff_true_type(data), "unknown")
 
 
 if __name__ == '__main__':

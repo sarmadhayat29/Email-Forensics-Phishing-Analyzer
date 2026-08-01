@@ -53,7 +53,9 @@ class DomainAgeTestCase(unittest.TestCase):
 
     def setUp(self):
         self._previous = os.environ.get("DOMAIN_AGE_ENABLED")
+        self._previous_cache = os.environ.get("WHOIS_CACHE_FILE")
         os.environ["DOMAIN_AGE_ENABLED"] = self.enabled
+        os.environ["WHOIS_CACHE_FILE"] = "none"
         domain_age.clear_cache()
         domain_age.reset_whois_health()
 
@@ -62,6 +64,10 @@ class DomainAgeTestCase(unittest.TestCase):
             os.environ.pop("DOMAIN_AGE_ENABLED", None)
         else:
             os.environ["DOMAIN_AGE_ENABLED"] = self._previous
+        if self._previous_cache is None:
+            os.environ.pop("WHOIS_CACHE_FILE", None)
+        else:
+            os.environ["WHOIS_CACHE_FILE"] = self._previous_cache
         domain_age.clear_cache()
         domain_age.reset_whois_health()
 

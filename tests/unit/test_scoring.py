@@ -4,8 +4,13 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
 
-from scoring import score_message, to_display_score, _bucket
-from models import ParsedMessage, AuthVerdict, RoutingVerdict, HeaderAnalysisVerdict
+from scoring import (
+    FAMILY_SCORE_CAPS, score_message, to_display_score, _bucket, _signal_family,
+)
+from models import (
+    Attachment, ParsedMessage, AuthVerdict, RoutingVerdict, HeaderAnalysisVerdict,
+    HeaderFinding,
+)
 from url_analysis import analyze_urls
 
 
@@ -289,6 +294,120 @@ class TestConfidenceWithLiveVerification(unittest.TestCase):
     def test_offline_deployment_is_not_penalised(self):
         """live_attempted=False (air-gapped) must score as it always has."""
         self.assertEqual(self._score().confidence, 90)
+
+
+class TestFamilyCaps(unittest.TestCase):
+    """Each evidence family saturates, so one stage cannot decide a verdict.
+
+    Correlated evidence within a family (five header findings about one forged
+    From, thirty links tripping one detector) must not accumulate its way to
+    Critical. Capping changes what a signal contributes, never whether the
+    analyst sees it.
+    """
+
+    def _family_weight(self, verdict, family):
+        return sum(s.weight for s in verdict.signals if _signal_family(s.indicator) == family)
+
+    def _family_signals(self, verdict, family):
+        return [s for s in verdict.signals if _signal_family(s.indicator) == family]
+
+    def test_authentication_saturates(self):
+        auth = AuthVerdict(
+            raw="", source="", spf="fail", dkim="fail", dmarc="fail",
+            inconsistencies=[f"Conflicting authentication header #{i}" for i in range(8)],
+        )
+        verdict = score_message(ParsedMessage(from_raw="a@b.com"), auth, RoutingVerdict(hop_count=3))
+        self.assertEqual(self._family_weight(verdict, "authentication"),
+                         FAMILY_SCORE_CAPS["authentication"])
+        # Every observation is still reported, capped or not.
+        self.assertEqual(len(self._family_signals(verdict, "authentication")), 11)
+
+    def test_hard_auth_failures_still_reach_high(self):
+        """The cap must not soften the verdict for genuinely spoofed mail."""
+        auth = AuthVerdict(raw="", source="", spf="fail", dkim="fail", dmarc="fail")
+        verdict = score_message(ParsedMessage(from_raw="a@b.com"), auth, RoutingVerdict(hop_count=3))
+        self.assertIn(verdict.risk_level, {"High", "Critical"})
+
+    def test_link_forensics_saturates(self):
+        anchors = "".join(
+            f'<a href="http://10.0.0.{i}/login?redirect=https://evil{i}.tk">paypal.com</a>'
+            for i in range(1, 13)
+        )
+        parsed = ParsedMessage(from_raw="a@b.com", body_html=anchors)
+        verdict = score_message(parsed, _pass_auth(), RoutingVerdict(hop_count=3),
+                                url_verdict=analyze_urls(parsed))
+        self.assertEqual(self._family_weight(verdict, "link forensics"),
+                         FAMILY_SCORE_CAPS["link forensics"])
+
+    def test_message_content_saturates_but_keeps_every_indicator(self):
+        parsed = ParsedMessage(
+            from_raw="a@b.com",
+            subject="Urgent notice: action required",
+            body_plain=(
+                "Security alert: suspicious activity. Please confirm your password. "
+                "Respond immediately or your account will be suspended. "
+                "Complete the wire transfer for the attached invoice #4021. "
+                "Your password expired, reset password now."
+            ),
+        )
+        verdict = score_message(parsed, _pass_auth(), RoutingVerdict(hop_count=3))
+        indicators = {s.indicator for s in self._family_signals(verdict, "message content")}
+        for expected in ("Suspicious Keywords", "Credential Harvesting Language",
+                         "Urgent Pressure Tactics", "Financial Scam Language",
+                         "Fake Invoice / BEC Indicators", "Password Reset Scam Language"):
+            self.assertIn(expected, indicators)
+        self.assertEqual(self._family_weight(verdict, "message content"),
+                         FAMILY_SCORE_CAPS["message content"])
+
+    def test_header_forensics_saturates(self):
+        findings = [
+            HeaderFinding(title=f"Forged Header #{i}", description="d", risk_level="Critical",
+                          evidence="e", recommendation="r")
+            for i in range(6)
+        ]
+        verdict = score_message(ParsedMessage(from_raw="a@b.com"), _pass_auth(),
+                                RoutingVerdict(hop_count=3),
+                                header_verdict=HeaderAnalysisVerdict(findings=findings))
+        self.assertEqual(self._family_weight(verdict, "header forensics"),
+                         FAMILY_SCORE_CAPS["header forensics"])
+
+    def test_attachment_forensics_saturates(self):
+        attachments = [
+            Attachment(filename=f"invoice_{i}.pdf.exe", declared_extension="exe",
+                       true_type="exe", size_bytes=1024, is_executable=True,
+                       has_double_extension=True)
+            for i in range(5)
+        ]
+        verdict = score_message(ParsedMessage(from_raw="a@b.com", attachments=attachments),
+                                _pass_auth(), RoutingVerdict(hop_count=3))
+        self.assertEqual(self._family_weight(verdict, "attachment forensics"),
+                         FAMILY_SCORE_CAPS["attachment forensics"])
+        self.assertEqual(len(self._family_signals(verdict, "attachment forensics")), 5)
+
+    def test_no_single_family_can_reach_critical_alone(self):
+        for cap in FAMILY_SCORE_CAPS.values():
+            self.assertLess(to_display_score(cap), 90)
+
+    def test_evidence_below_a_cap_is_untouched(self):
+        """Ordinary messages keep the exact weights they always had."""
+        auth = AuthVerdict(raw="", source="", spf="fail", dkim="pass", dmarc="pass")
+        verdict = score_message(ParsedMessage(from_raw="a@b.com"), auth, RoutingVerdict(hop_count=3))
+        self.assertEqual(verdict.total_score, 30)
+
+    def test_strongest_evidence_in_a_family_is_what_scores(self):
+        """Budget goes to the severe finding, not to whichever came first."""
+        findings = [
+            HeaderFinding(title="Minor note", description="d", risk_level="Low",
+                          evidence="e", recommendation="r"),
+        ] * 20 + [
+            HeaderFinding(title="Forged From", description="d", risk_level="Critical",
+                          evidence="e", recommendation="r"),
+        ]
+        verdict = score_message(ParsedMessage(from_raw="a@b.com"), _pass_auth(),
+                                RoutingVerdict(hop_count=3),
+                                header_verdict=HeaderAnalysisVerdict(findings=findings))
+        critical = next(s for s in verdict.signals if s.indicator.endswith("Forged From"))
+        self.assertEqual(critical.weight, 35)
 
 
 if __name__ == '__main__':
