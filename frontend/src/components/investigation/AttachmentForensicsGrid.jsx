@@ -17,8 +17,8 @@ function AttachmentForensicsGrid({ attachments, embeddedImages }) {
   };
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs text-left font-mono">
+    <div className="overflow-x-auto -mx-1 px-1">
+      <table className="w-full min-w-[640px] text-xs text-left font-mono">
         <thead>
           <tr className="border-b border-emerald-900/40 text-slate-400 uppercase">
             <th className="py-2.5 px-3">Filename</th>

@@ -3,8 +3,12 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    @apply overflow-x-hidden;
+  }
+
   body {
-    @apply bg-slate-900 text-slate-100 min-h-screen font-sans;
+    @apply bg-slate-900 text-slate-100 min-h-screen font-sans overflow-x-hidden;
   }
 }
 
@@ -12,4 +16,10 @@
   background: rgba(30, 41, 59, 0.7);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(51, 65, 85, 0.6);
+}
+
+/* Utility: wrap long forensic tokens without blowing the layout */
+.break-anywhere {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }

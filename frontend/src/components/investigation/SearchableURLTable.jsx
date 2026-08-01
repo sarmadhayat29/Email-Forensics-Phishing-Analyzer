@@ -42,14 +42,14 @@ function SearchableURLTable({ urlAnalysis }) {
       <div className="relative">
         <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
         <input
-          type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+          type="search" value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
           placeholder="Filter URLs by host domain, target URL, or anchor text..."
-          className="w-full bg-soc-bg border border-emerald-900/40 rounded-xl pl-9 pr-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500"
+          className="w-full min-h-11 bg-soc-bg border border-emerald-900/40 rounded-xl pl-9 pr-3 py-2.5 text-slate-100 focus:outline-none focus:border-emerald-500"
         />
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs text-left font-mono">
+      <div className="overflow-x-auto -mx-1 px-1">
+        <table className="w-full min-w-[560px] text-xs text-left font-mono">
           <thead>
             <tr className="border-b border-emerald-900/40 text-slate-400 uppercase">
               <th className="py-2.5 px-3">Normalized Target URL</th>
