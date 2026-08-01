@@ -61,6 +61,18 @@ function OverallVerdictBanner({ finding }) {
           </span>
         </div>
       </div>
+
+      {(finding.classification_reason || finding.rationale) && (
+        <div className="p-4 bg-soc-bg border border-emerald-900/40 rounded-xl text-left font-mono text-xs space-y-1">
+          <span className="text-slate-400 text-[10px] uppercase block">Classification Reasoning</span>
+          <p className="text-slate-200">{finding.classification_reason || finding.rationale}</p>
+          <p className="text-slate-500 text-[10px]">
+            Strong signals: {finding.strong_signal_count ?? 0}
+            {' · '}Weak signals: {finding.weak_signal_count ?? 0}
+            {finding.trusted_sender ? ' · Trusted authenticated sender' : ''}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
