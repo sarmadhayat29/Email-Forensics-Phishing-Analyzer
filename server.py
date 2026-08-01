@@ -63,25 +63,27 @@ app.include_router(history.router, prefix="/api/analyses", tags=["history"])
 app.include_router(reports.router, prefix="/api/report", tags=["reports"])
 
 # ---------------------------------------------------------------------------
-# SPA static hosting (React + Vite + React Router BrowserRouter)
+# SPA static hosting (React + Vite + HashRouter)
 #
-# Production serves frontend/dist from this same process (see Procfile).
-# Client-side routes like /dashboard and /analysis/:id are not real files on
-# disk. StaticFiles(html=True) only serves index.html for directories / missing
-# 404.html — it does NOT fall back to index.html for arbitrary paths, so a
-# browser refresh on a deep link returned 404. The catch-all below serves
-# real dist assets when they exist, otherwise index.html so React Router can
-# resolve the path. API routers registered above always take precedence.
+# HashRouter keeps UI paths in the URL hash, so a refresh always hits "/" /
+# index.html. The catch-all below still serves index.html for any non-API
+# path so BrowserRouter deep links and direct asset requests keep working if
+# the frontend is ever switched back, and so /assets/* is mounted correctly.
 # ---------------------------------------------------------------------------
 DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+_ASSET_SUFFIXES = (
+    ".js", ".css", ".map", ".json", ".png", ".jpg", ".jpeg", ".gif", ".svg",
+    ".ico", ".webp", ".woff", ".woff2", ".ttf", ".eot", ".txt", ".webmanifest",
+)
 
 
 def resolve_spa_file(dist_dir: str, full_path: str) -> str:
     """Return the filesystem path to serve for a browser request.
 
-    Real files under ``dist_dir`` (favicon, SVG, etc.) are returned as-is.
-    Everything else — including React Router paths like ``dashboard`` or
-    ``analysis/123`` — resolves to ``index.html`` so the SPA can boot.
+    Real files under ``dist_dir`` (favicon, SVG, hashed bundles, etc.) are
+    returned as-is. Everything else resolves to ``index.html`` so a client
+    router can boot.
     """
     index_path = os.path.join(dist_dir, "index.html")
     if not full_path or full_path in {".", "/"}:
@@ -120,6 +122,11 @@ if os.path.isdir(DIST_DIR):
             raise HTTPException(status_code=404, detail="Not Found")
 
         target = resolve_spa_file(DIST_DIR, full_path)
+        # Missing real static assets should stay 404 (not return HTML).
+        lower = full_path.lower()
+        if target.endswith("index.html") and any(lower.endswith(ext) for ext in _ASSET_SUFFIXES):
+            raise HTTPException(status_code=404, detail="Static asset not found")
+
         if not os.path.isfile(target):
             raise HTTPException(
                 status_code=404,

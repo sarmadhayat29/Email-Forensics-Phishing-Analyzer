@@ -808,6 +808,16 @@ def _apply_high_risk_gate(
         )
         return provisional, reason, evidence_summary + " " + reason
 
+    # Authentication failures alone must not produce High/Critical — they need
+    # corroboration from another family (impersonation, malware, credential lure).
+    if strong_families == {"authentication"}:
+        reason = (
+            f"Demoted from {provisional} to Medium: authentication failures alone "
+            f"(strong weight={strong_weight}) require corroborating evidence from "
+            f"another analysis family before High risk."
+        )
+        return "Medium", reason, evidence_summary + " " + reason
+
     if strong_weight >= MIN_STRONG_WEIGHT_FOR_HIGH:
         reason = (
             f"{provisional}: strong evidence weight {strong_weight} "
