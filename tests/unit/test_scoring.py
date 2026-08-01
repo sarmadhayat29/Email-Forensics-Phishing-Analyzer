@@ -71,19 +71,18 @@ class TestScoring(unittest.TestCase):
         self.assertIn("IP-Based Link Target", indicators)
         self.assertIn("Multiple / Open Redirect Link Parameter", indicators)
 
-    def test_fake_invoice_and_financial_scam(self):
+    def test_invoice_language_alone_stays_medium_or_low(self):
+        """Billing language must not reach High without a second strong family."""
         parsed = ParsedMessage(
-            from_raw="billing@vendor-update.com",
-            subject="Invoice #49204 Payment Overdue",
-            body_plain="Please process wire transfer for attached invoice #49204 immediately."
+            from_raw="billing@partner.org",
+            subject="Invoice #49204",
+            body_plain="Please find invoice #49204. Payment due Aug 15. Wire transfer details attached.",
         )
-        auth = AuthVerdict(raw="", source="", spf="pass", dkim="pass", dmarc="pass")
-        routing = RoutingVerdict(hop_count=2)
-
-        verdict = score_message(parsed, auth, routing)
-        indicators = [s.indicator for s in verdict.signals]
-        self.assertIn("Financial Scam Language", indicators)
-        self.assertIn("Fake Invoice / BEC Indicators", indicators)
+        verdict = score_message(parsed, _pass_auth(), RoutingVerdict(hop_count=3))
+        self.assertIn(verdict.risk_level, {"Low", "Medium"})
+        strengths = {s.indicator: s.strength for s in verdict.signals if s.weight > 0}
+        self.assertEqual(strengths.get("Fake Invoice / BEC Indicators"), "weak")
+        self.assertEqual(strengths.get("Financial Scam Language"), "strong")
 
     def test_punycode_domain(self):
         parsed = ParsedMessage(

@@ -79,6 +79,12 @@ class TestOrganizationAndEspMatching(unittest.TestCase):
         self.assertFalse(is_legitimate_esp("gmail.com"))
         self.assertFalse(is_legitimate_esp("evil.tk"))
 
+    def test_display_name_brand_word_boundary(self):
+        from utils import display_name_brand_conflict
+        self.assertIsNone(display_name_brand_conflict("Pineapple Corp", "fruit.example"))
+        self.assertEqual(display_name_brand_conflict("PayPal Support", "evil.example"), "paypal")
+        self.assertEqual(display_name_brand_conflict("Microsoft Security", "random-domain.xyz"), "microsoft")
+
     def test_domain_relationship_classes(self):
         self.assertEqual(domain_relationship("company.com", "support.company.com"), "same_org")
         self.assertEqual(domain_relationship("brand.com", "em.sendgrid.net"), "trusted_esp")
@@ -162,8 +168,10 @@ class TestSharedConstants(unittest.TestCase):
         self.assertIs(url_analysis.HIGH_RISK_TLDS, HIGH_RISK_TLDS)
         self.assertIs(header_analysis.HIGH_RISK_TLDS, HIGH_RISK_TLDS)
         # Union of the three former lists.
-        for tld in {"xyz", "top", "tk", "icu", "rest", "monster", "live"}:
+        for tld in {"xyz", "top", "tk", "icu", "rest", "monster"}:
             self.assertIn(tld, HIGH_RISK_TLDS)
+        self.assertNotIn("live", HIGH_RISK_TLDS)
+        self.assertNotIn("support", HIGH_RISK_TLDS)
 
     def test_expanded_lists(self):
         for ext in {"lnk", "iso", "img", "chm", "xll", "vhd"}:

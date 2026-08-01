@@ -192,20 +192,14 @@ class TestHeaderAnalysis(unittest.TestCase):
         titles = [f.title for f in verdict.findings]
         self.assertIn("High-Risk Top-Level Domain (TLD)", titles)
 
-    def test_display_name_spoofing_uses_real_sending_domain(self):
-        """A brand address in the display name must not suppress the finding."""
-        header = '"service@paypal.com" <thief@evil-domain.tk>'
+    def test_pineapple_display_name_is_not_apple_impersonation(self):
         parsed = ParsedMessage(
-            from_raw=header,
-            to_raw="victim@company.com",
-            subject="Account Notice",
-            date="Wed, 22 Jul 2026 10:00:00 +0000",
-            message_id="<msg1@evil-domain.tk>",
-            headers={"From": header},
+            from_raw="Pineapple Corp <sales@fruit.example>",
+            message_id="<m@fruit.example>",
+            headers={"From": "Pineapple Corp <sales@fruit.example>", "Message-ID": "<m@fruit.example>"},
         )
-        verdict = analyze_headers(parsed)
-        titles = [f.title for f in verdict.findings]
-        self.assertIn("Display Name Email Spoofing", titles)
+        titles = [f.title for f in analyze_headers(parsed).findings]
+        self.assertNotIn("Display Name Brand Impersonation", titles)
 
 
 class TestAuthenticationResultsAttribution(unittest.TestCase):

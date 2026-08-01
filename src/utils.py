@@ -126,11 +126,18 @@ def build_match_text(body_plain: str, body_html: str) -> str:
 # Union of the TLD blocklists that previously lived separately in
 # scoring.py, url_analysis.py and header_analysis.py.
 HIGH_RISK_TLDS = {
-    "xyz", "top", "work", "buzz", "click", "country", "tk", "ml", "ga", "cf",
-    "gq", "fit", "surf", "icu", "rest", "monster", "live", "cam", "zip",
-    "mov", "quest", "cyou", "sbs", "lol", "bar", "loan", "review", "gdn",
-    "kim", "men", "party", "racing", "stream", "download", "support",
+    # Free / abuse-heavy country and legacy phishing TLDs (strong when on From)
+    "tk", "ml", "ga", "cf", "gq",
+    # Frequently abused new gTLDs (weak corroborators — also used by some legit sites)
+    "xyz", "top", "click", "country", "icu", "rest", "monster", "cam",
+    "cyou", "sbs", "loan", "gdn", "stream", "download",
 }
+
+# Subset of HIGH_RISK_TLDS that almost never host legitimate branded mail.
+# Used for strong sender-identity scoring; other high-risk TLDs stay weak.
+CORE_ABUSE_TLDS = {"tk", "ml", "ga", "cf", "gq"}
+
+
 
 # Public suffixes that need three labels to reach a registrable domain.
 MULTI_LABEL_SUFFIXES = {
@@ -330,6 +337,32 @@ def is_free_mail_provider(domain: str) -> bool:
         return False
     reg = registrable_domain(domain.lower().strip("."))
     return reg in FREE_MAIL_PROVIDERS
+
+
+def display_name_brand_conflict(display_name: str, from_domain: str) -> str | None:
+    """Return a brand token when the display name claims it but From does not.
+
+    Uses whole-word matching so ``Pineapple Corp`` does not match ``apple``.
+    Short brand tokens (``ups``, ``dhl``) are skipped — they collide with ordinary words.
+    """
+    if not display_name or not from_domain:
+        return None
+    display_lc = display_name.lower()
+    from_lc = from_domain.lower()
+    from_reg = registrable_domain(from_lc)
+    for brand in TARGET_BRANDS:
+        if brand in BRAND_CONTAINMENT_EXEMPT:
+            continue
+        if len(brand) < BRAND_CONTAINMENT_MIN_LEN:
+            continue
+        if not re.search(rf"\b{re.escape(brand)}\b", display_lc):
+            continue
+        if brand in from_lc or (from_reg and brand in from_reg):
+            continue
+        if from_reg in BRAND_OWNED_DOMAINS:
+            continue
+        return brand
+    return None
 
 
 def domain_relationship(from_domain: str, other_domain: str) -> str:
