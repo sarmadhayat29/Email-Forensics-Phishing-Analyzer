@@ -128,7 +128,10 @@ class TestAuthenticationWeighting(unittest.TestCase):
         self.assertIn("SPF Authentication Failure", indicators)
         self.assertIn("DKIM Signature Failure", indicators)
         self.assertIn("DMARC Policy Violation", indicators)
-        self.assertIn(verdict.risk_level, {"High", "Critical"})
+        # Auth alone saturates High band by raw score but the corroboration gate
+        # keeps the verdict at Medium without a second evidence family.
+        self.assertEqual(verdict.risk_level, "Medium")
+        self.assertGreaterEqual(verdict.display_score, 70)
 
     def test_unsigned_legitimate_mail_stays_low(self):
         """spf/dkim/dmarc = none must not push ordinary unsigned mail out of Low."""
@@ -322,10 +325,24 @@ class TestFamilyCaps(unittest.TestCase):
         # Every observation is still reported, capped or not.
         self.assertEqual(len(self._family_signals(verdict, "authentication")), 11)
 
-    def test_hard_auth_failures_still_reach_high(self):
-        """The cap must not soften the verdict for genuinely spoofed mail."""
+    def test_hard_auth_failures_alone_stay_medium(self):
+        """Authentication failures alone must not produce High without corroboration."""
         auth = AuthVerdict(raw="", source="", spf="fail", dkim="fail", dmarc="fail")
         verdict = score_message(ParsedMessage(from_raw="a@b.com"), auth, RoutingVerdict(hop_count=3))
+        self.assertEqual(verdict.risk_level, "Medium")
+        self.assertIn("authentication failures alone", verdict.classification_reason.lower())
+
+    def test_hard_auth_failures_with_impersonation_reach_high(self):
+        auth = AuthVerdict(raw="", source="", spf="fail", dkim="fail", dmarc="fail")
+        findings = [
+            HeaderFinding(title="Lookalike Brand Domain (Typosquatting)", description="d",
+                          risk_level="High", evidence="e", recommendation="r"),
+        ]
+        verdict = score_message(
+            ParsedMessage(from_raw="PayPal <security@paypa1-secure.tk>"),
+            auth, RoutingVerdict(hop_count=3),
+            header_verdict=HeaderAnalysisVerdict(findings=findings),
+        )
         self.assertIn(verdict.risk_level, {"High", "Critical"})
 
     def test_link_forensics_saturates(self):

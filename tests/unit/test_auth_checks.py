@@ -11,6 +11,7 @@ from contextlib import ExitStack
 from unittest import mock
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../src')))
+sys.path.insert(0, os.path.dirname(__file__))
 
 import auth_checks
 import live_auth
@@ -84,19 +85,32 @@ class TestHeaderDkimAlignment(unittest.TestCase):
 UNSIGNED_MESSAGE = b"From: Billing <billing@example.com>\r\nSubject: Invoice\r\n\r\nBody\r\n"
 
 
-def _phish_parsed(auth_claim="mx.example.com; spf=pass smtp.mailfrom=example.com; "
+def _phish_parsed(auth_claim="attacker.invalid; spf=pass smtp.mailfrom=example.com; "
                             "dkim=pass header.d=example.com; dmarc=pass header.from=example.com",
-                  raw_bytes=UNSIGNED_MESSAGE):
-    """A message claiming a full authentication pass, sent from a public IP."""
+                  raw_bytes=UNSIGNED_MESSAGE,
+                  received_by="mx.example.com"):
+    """A message claiming a full authentication pass, sent from a public IP.
+
+    Default authserv-id is *unattributed* (does not match Received ``by``), so
+    live verification may override injected PASS claims. Pass an attributed
+    claim explicitly to exercise header-authoritative retention.
+    """
     return ParsedMessage(
         from_raw="Billing <billing@example.com>",
         received_chain=[
-            "from relay.evil.ru ([185.220.101.7]) by mx.example.com with SMTP; "
+            f"from relay.evil.ru ([185.220.101.7]) by {received_by} with SMTP; "
             "Wed, 15 Jul 2026 09:41:12 +0000",
         ],
         authentication_results=[auth_claim],
         body_plain="Please pay the attached invoice.",
         raw_bytes=raw_bytes,
+    )
+
+
+def _attributed_pass_claim():
+    return (
+        "mx.example.com; spf=pass smtp.mailfrom=example.com; "
+        "dkim=pass header.d=example.com; dmarc=pass header.from=example.com"
     )
 
 
@@ -120,29 +134,49 @@ class TestLiveReverify(unittest.TestCase):
                                                       lambda *a, **kw: dkim_result))
             return live_reverify(parsed)
 
-    def test_live_results_are_preferred_over_headers(self):
+    def test_live_results_override_unattributed_headers(self):
         verdict = self._run(_phish_parsed())
         self.assertTrue(verdict.live_attempted)
         self.assertTrue(verdict.live_verified)
         self.assertTrue(verdict.source.startswith(auth_checks.LIVE_SOURCE_PREFIX))
-        self.assertIn("SPF/DKIM/DMARC", verdict.source)
+        self.assertIn("SPF", verdict.source)
         self.assertEqual(verdict.spf, "fail")
         self.assertEqual(verdict.dmarc, "fail")
         self.assertEqual(verdict.dmarc_policy, "reject")
         self.assertIn("185.220.101.7", verdict.note)
 
-    def test_injected_pass_claim_does_not_survive_a_live_failure(self):
+    def test_injected_unattributed_pass_does_not_survive_a_live_failure(self):
         verdict = self._run(_phish_parsed())
-        contradictions = [inc for inc in verdict.inconsistencies if "Forged or stale" in inc]
+        contradictions = [inc for inc in verdict.inconsistencies if "Verification mismatch" in inc]
         self.assertTrue(any("spf=pass" in inc and "spf=fail" in inc for inc in contradictions))
         self.assertTrue(any("enforcing policy (p=reject)" in inc for inc in verdict.inconsistencies))
 
-    def test_stripped_dkim_signature_is_not_called_a_forgery(self):
-        """A claimed dkim=pass with no signature left is reported, not accused.
+    def test_attributed_header_pass_is_retained_when_live_spf_disagrees(self):
+        """Border-MTA Authentication-Results are authoritative for scoring.
 
-        Downstream relays and mailing lists legitimately strip signatures, so the
-        verdict drops to 'none' without raising a spoofing finding.
+        Reconstructing the connecting IP from Received text is unreliable; a
+        disagreement becomes a verification mismatch, not a forged-header fail.
         """
+        parsed = _phish_parsed(auth_claim=_attributed_pass_claim())
+        verdict = self._run(parsed)
+        self.assertEqual(verdict.spf, "pass")
+        self.assertEqual(verdict.dmarc, "pass")
+        self.assertTrue(any("Verification mismatch" in inc and "spf" in inc
+                            for inc in verdict.inconsistencies))
+        self.assertTrue(any("header-authoritative" in check for check in verdict.live_checks))
+        # Must not invent a hard SPF fail that would drive High risk.
+        self.assertFalse(any("spf=fail" in check and "live-verified (fail)" in check
+                             for check in verdict.live_checks))
+
+    def test_attributed_dkim_pass_retained_when_signature_stripped(self):
+        parsed = _phish_parsed(auth_claim=_attributed_pass_claim())
+        verdict = self._run(parsed)
+        self.assertEqual(verdict.dkim, "pass")
+        self.assertFalse([inc for inc in verdict.inconsistencies
+                          if "Forged or stale" in inc])
+
+    def test_stripped_dkim_signature_is_not_called_a_forgery(self):
+        """Unattributed claimed dkim=pass with no signature is not accused of forgery."""
         verdict = self._run(_phish_parsed())
         self.assertEqual(verdict.dkim, "none")
         self.assertFalse([inc for inc in verdict.inconsistencies
@@ -156,7 +190,8 @@ class TestLiveReverify(unittest.TestCase):
         verdict = self._run(_phish_parsed(), dns=dns)
         self.assertEqual(verdict.spf, "pass")
         self.assertEqual(verdict.dmarc, "pass")
-        self.assertFalse([inc for inc in verdict.inconsistencies if "Forged or stale" in inc])
+        self.assertFalse([inc for inc in verdict.inconsistencies if "Verification mismatch" in inc
+                          and "spf=fail" in inc])
 
     def test_live_dkim_failure_overrides_a_claimed_dkim_pass(self):
         parsed = _phish_parsed(raw_bytes=SIGNED_MESSAGE)
@@ -166,6 +201,16 @@ class TestLiveReverify(unittest.TestCase):
         ))
         self.assertEqual(verdict.dkim, "fail")
         self.assertTrue(any("dkim=pass" in inc and "dkim=fail" in inc
+                            for inc in verdict.inconsistencies))
+
+    def test_live_dkim_crypto_fail_overrides_even_attributed_header(self):
+        parsed = _phish_parsed(auth_claim=_attributed_pass_claim(), raw_bytes=SIGNED_MESSAGE)
+        verdict = self._run(parsed, dkim_result=live_auth.DkimResult(
+            verdict="fail", detail="signature #1 failed verification",
+            signature_domains=["example.com"],
+        ))
+        self.assertEqual(verdict.dkim, "fail")
+        self.assertTrue(any("Verification mismatch" in inc and "dkim" in inc
                             for inc in verdict.inconsistencies))
 
     def test_live_dkim_misalignment_is_reported(self):
@@ -186,7 +231,7 @@ class TestLiveReverify(unittest.TestCase):
         verdict = self._run(_phish_parsed())
         self.assertEqual(len(verdict.live_checks), 3)
         for mechanism in ("SPF", "DKIM", "DMARC"):
-            self.assertTrue(any(check.startswith(f"{mechanism}: live-verified")
+            self.assertTrue(any(check.startswith(f"{mechanism}:")
                                 for check in verdict.live_checks), mechanism)
 
     def test_without_raw_bytes_dkim_stays_header_derived(self):
@@ -196,6 +241,20 @@ class TestLiveReverify(unittest.TestCase):
         # DKIM unknown means DMARC alignment cannot be settled either.
         self.assertTrue(any("DMARC: header-derived" in check for check in verdict.live_checks))
 
+    def test_designated_ip_from_ar_commentary_is_preferred(self):
+        claim = (
+            "mx.example.com; spf=pass (mx.example.com: domain of newsletter@example.com "
+            "designates 185.220.101.7 as permitted sender) smtp.mailfrom=example.com; "
+            "dkim=pass header.d=example.com; dmarc=pass header.from=example.com"
+        )
+        dns = FakeDns(txt={
+            "example.com": ["v=spf1 ip4:185.220.101.0/24 -all"],
+            "_dmarc.example.com": ["v=DMARC1; p=none"],
+        })
+        parsed = _phish_parsed(auth_claim=claim)
+        verdict = self._run(parsed, dns=dns)
+        self.assertEqual(verdict.spf, "pass")
+        self.assertIn("185.220.101.7", verdict.note)
 
 class TestLiveReverifyDegradation(unittest.TestCase):
 

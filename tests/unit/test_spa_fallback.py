@@ -58,6 +58,12 @@ class TestSpaFallback(unittest.TestCase):
         target = resolve_spa_file(str(self.dist), "../secrets.txt")
         self.assertEqual(target, self.index)
 
+    def test_missing_asset_path_resolves_to_index_for_router(self):
+        # resolve_spa_file itself maps unknown paths to index; the HTTP layer
+        # rejects missing *.js/*.css with a hard 404.
+        target = resolve_spa_file(str(self.dist), "dashboard")
+        self.assertEqual(target, self.index)
+
 
 if __name__ == "__main__":
     unittest.main()
