@@ -15,6 +15,9 @@ from utils import (
     extract_display_name,
     looks_like_lookalike,
     registrable_domain,
+    domain_relationship,
+    is_legitimate_esp,
+    same_organization,
     KNOWN_BRAND_DOMAINS,
     HIGH_RISK_TLDS,
 )
@@ -88,13 +91,6 @@ def _check_display_name_spoofing(parsed: ParsedMessage, findings: List[HeaderFin
             break
 
 
-LEGITIMATE_ESPS = {
-    "sendgrid.net", "mailchimp.com", "amazonses.com", "mailgun.org",
-    "postmarkapp.com", "mcsv.net", "docusign.net", "hubspotemail.net",
-    "salesforce.com", "zendesk.com", "freshdesk.com", "intercom-mail.com"
-}
-
-
 def _check_from_vs_sender(parsed: ParsedMessage, findings: List[HeaderFinding]) -> None:
     if not parsed.sender_raw:
         return
@@ -104,25 +100,40 @@ def _check_from_vs_sender(parsed: ParsedMessage, findings: List[HeaderFinding]) 
     from_domain = extract_domain(parsed.from_raw)
     sender_domain = extract_domain(parsed.sender_raw)
 
-    if from_addr and sender_addr and from_addr != sender_addr:
-        # Check if Sender is a known authorized Email Service Provider
-        if sender_domain and any(esp in sender_domain.lower() for esp in LEGITIMATE_ESPS):
-            findings.append(HeaderFinding(
-                title="From vs. Sender Delegate",
-                description="The message was transmitted by a recognized transactional email delegation provider.",
-                risk_level="Low",
-                evidence=f"From: '{from_addr}' | Delegate Sender: '{sender_addr}'",
-                recommendation="Normal transactional mail delegation. Verify SPF/DKIM authentication."
-            ))
-        else:
-            risk = "High" if from_domain != sender_domain else "Medium"
-            findings.append(HeaderFinding(
-                title="From vs. Sender Mismatch",
-                description="The 'From' address (author) differs from the 'Sender' address (actual transmitter).",
-                risk_level=risk,
-                evidence=f"From: '{from_addr}' | Sender: '{sender_addr}'",
-                recommendation="Inspect Sender domain alignment and check if third-party mailing delegate is authorized."
-            ))
+    if not (from_addr and sender_addr and from_addr != sender_addr):
+        return
+
+    relation = domain_relationship(from_domain or "", sender_domain or "")
+    if relation in ("same_org", "trusted_esp") or (
+        sender_domain and is_legitimate_esp(sender_domain)
+    ) or (from_domain and sender_domain and same_organization(from_domain, sender_domain)):
+        findings.append(HeaderFinding(
+            title="From vs. Sender Delegate",
+            description="The message was transmitted by the same organisation or a recognized mail/CRM provider.",
+            risk_level="Low",
+            evidence=f"From: '{from_addr}' | Delegate Sender: '{sender_addr}'",
+            recommendation="Normal transactional mail delegation. Verify SPF/DKIM authentication."
+        ))
+        return
+
+    if relation == "suspicious":
+        findings.append(HeaderFinding(
+            title="From vs. Sender Mismatch",
+            description="The Sender domain shows deception indicators relative to the From identity (free-mail diversion, high-risk TLD, or lookalike).",
+            risk_level="High",
+            evidence=f"From: '{from_addr}' | Sender: '{sender_addr}'",
+            recommendation="Treat as high-risk; verify the transmitting domain out-of-band."
+        ))
+        return
+
+    # Different organisation without clear deception — weak informational only.
+    findings.append(HeaderFinding(
+        title="From vs. Sender Domain Difference",
+        description="Author and transmitter domains differ. This is common with mailing platforms but warrants a glance at SPF/DKIM alignment.",
+        risk_level="Low",
+        evidence=f"From: '{from_addr}' | Sender: '{sender_addr}'",
+        recommendation="Confirm the Sender is an authorized mailing delegate for the From domain."
+    ))
 
 
 def _check_from_vs_reply_to(parsed: ParsedMessage, findings: List[HeaderFinding]) -> None:
@@ -134,15 +145,40 @@ def _check_from_vs_reply_to(parsed: ParsedMessage, findings: List[HeaderFinding]
     from_domain = extract_domain(parsed.from_raw)
     reply_to_domain = extract_domain(parsed.reply_to_raw)
 
-    if from_addr and reply_to_addr and from_addr != reply_to_addr:
-        risk = "High" if from_domain != reply_to_domain else "Medium"
+    if not (from_addr and reply_to_addr and from_addr != reply_to_addr):
+        return
+
+    # Same address local-part difference on the same host, or same org /
+    # trusted ESP / helpdesk — legitimate operational pattern. No risk bump.
+    relation = domain_relationship(from_domain or "", reply_to_domain or "")
+    if relation in ("same_org", "trusted_esp"):
+        return
+
+    if relation == "suspicious":
         findings.append(HeaderFinding(
-            title="From vs. Reply-To Mismatch",
-            description="Replies will be directed to an address or domain different from the listed sender.",
-            risk_level=risk,
+            title="Suspicious Reply-To Destination",
+            description=(
+                "Replies are diverted to a destination with strong deception indicators "
+                "(consumer free-mail, high-risk TLD, or lookalike domain) relative to the From identity."
+            ),
+            risk_level="High",
             evidence=f"From: '{from_addr}' | Reply-To: '{reply_to_addr}'",
-            recommendation="Do not reply to this email without verifying the Reply-To recipient identity."
+            recommendation="Do not reply; verify the intended contact channel through a known official source."
         ))
+        return
+
+    # Unrelated organisational domains without free-mail / TLD / lookalike evidence.
+    # Different ≠ suspicious: keep as a weak Medium for BEC review, not High.
+    findings.append(HeaderFinding(
+        title="From vs. Reply-To Domain Difference",
+        description=(
+            "Reply-To points to a different organisation than From. This can be legitimate "
+            "(partners, ticketing) or reply diversion — treat as context, not proof of phishing."
+        ),
+        risk_level="Medium",
+        evidence=f"From: '{from_addr}' | Reply-To: '{reply_to_addr}'",
+        recommendation="Confirm the Reply-To recipient through an independent channel before responding."
+    ))
 
 
 def _check_from_vs_return_path(parsed: ParsedMessage, findings: List[HeaderFinding]) -> None:
@@ -152,23 +188,37 @@ def _check_from_vs_return_path(parsed: ParsedMessage, findings: List[HeaderFindi
     from_domain = extract_domain(parsed.from_raw)
     return_path_domain = extract_domain(parsed.return_path_raw)
 
-    if from_domain and return_path_domain and from_domain != return_path_domain:
-        if any(esp in return_path_domain.lower() for esp in LEGITIMATE_ESPS):
-            findings.append(HeaderFinding(
-                title="From vs. Return-Path ESP Bounce Domain",
-                description="Return-Path points to an authorized ESP bounce handling domain.",
-                risk_level="Low",
-                evidence=f"From Domain: '{from_domain}' | ESP Return-Path: '{return_path_domain}'",
-                recommendation="Standard ESP bounce processing. Verify DKIM/DMARC alignment."
-            ))
-        else:
-            findings.append(HeaderFinding(
-                title="From vs. Return-Path Domain Mismatch",
-                description="The envelope bounce address (Return-Path) domain does not match the header From domain.",
-                risk_level="Medium",
-                evidence=f"From Domain: '{from_domain}' | Return-Path Domain: '{return_path_domain}'",
-                recommendation="Check DMARC alignment and SPF records for third-party bounce handling."
-            ))
+    if not (from_domain and return_path_domain and from_domain != return_path_domain):
+        return
+
+    relation = domain_relationship(from_domain, return_path_domain)
+    if relation in ("same_org", "trusted_esp") or is_legitimate_esp(return_path_domain):
+        findings.append(HeaderFinding(
+            title="From vs. Return-Path ESP Bounce Domain",
+            description="Return-Path points to the same organisation or an authorized ESP bounce domain.",
+            risk_level="Low",
+            evidence=f"From Domain: '{from_domain}' | Return-Path Domain: '{return_path_domain}'",
+            recommendation="Standard bounce processing. Verify DKIM/DMARC alignment."
+        ))
+        return
+
+    if relation == "suspicious":
+        findings.append(HeaderFinding(
+            title="From vs. Return-Path Domain Mismatch",
+            description="Envelope bounce domain shows deception indicators relative to the From domain.",
+            risk_level="High",
+            evidence=f"From Domain: '{from_domain}' | Return-Path Domain: '{return_path_domain}'",
+            recommendation="Verify SPF/DMARC; bounce domain may be attacker-controlled."
+        ))
+        return
+
+    findings.append(HeaderFinding(
+        title="From vs. Return-Path Domain Difference",
+        description="Return-Path domain differs from From without clear ESP or same-org alignment.",
+        risk_level="Low",
+        evidence=f"From Domain: '{from_domain}' | Return-Path Domain: '{return_path_domain}'",
+        recommendation="Check DMARC alignment; third-party bounce handling is often legitimate."
+    ))
 
 
 

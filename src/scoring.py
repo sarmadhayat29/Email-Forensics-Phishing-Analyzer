@@ -25,6 +25,7 @@ from html_analysis import (
 from utils import (
     extract_domain, extract_address, extract_display_name,
     looks_like_lookalike, is_punycode_or_unicode,
+    domain_relationship,
     detect_redirect_param, has_double_extension, RISKY_EXTENSIONS,
     KNOWN_BRAND_DOMAINS, build_match_text, normalize_text,
     HIGH_RISK_TLDS, registrable_domain, TRUSTED_TRANSACTIONAL_DOMAINS,
@@ -134,7 +135,8 @@ SIGNAL_FAMILIES = [
     # relationship with the sender, not about how the sender looks.
     ("sender history", ("sender history",)),
     ("sender identity", ("display name", "lookalike", "typosquat", "top-level domain",
-                         "punycode", "mismatched sender")),
+                         "punycode", "mismatched sender", "reply / sender diversion",
+                         "suspicious reply", "different sender header")),
 ]
 DEFAULT_SIGNAL_FAMILY = "message content"
 
@@ -741,6 +743,22 @@ def is_trusted_authenticated_sender(from_domain: str, auth: AuthVerdict) -> bool
     return reg in TRUSTED_TRANSACTIONAL_DOMAINS
 
 
+def has_suspicious_reply_diversion(parsed: ParsedMessage) -> bool:
+    """True when Reply-To / Sender / Return-Path shows deception vs From.
+
+    Brand From with free-mail or high-risk Reply-To must not receive trusted-sender
+    content dampening — that pattern is classic reply diversion.
+    """
+    from_domain = extract_domain(parsed.from_raw)
+    if not from_domain:
+        return False
+    for raw in (parsed.reply_to_raw, parsed.sender_raw, parsed.return_path_raw):
+        other = extract_domain(raw or "")
+        if other and domain_relationship(from_domain, other) == "suspicious":
+            return True
+    return False
+
+
 def _apply_trusted_sender_dampening(
     signals: List[PhishingSignal],
     trusted: bool,
@@ -941,7 +959,10 @@ def score_message(
     # HTML markup, entities and zero-width characters are stripped so keyword
     # and phrase matching sees the text a human actually reads.
     body = build_match_text(parsed.body_plain, parsed.body_html)
-    trusted = is_trusted_authenticated_sender(from_domain or "", auth)
+    trusted = (
+        is_trusted_authenticated_sender(from_domain or "", auth)
+        and not has_suspicious_reply_diversion(parsed)
+    )
 
     # --- URL Analysis Signals ---
     if url_verdict and url_verdict.urls:
@@ -1041,26 +1062,47 @@ def score_message(
                 strength="strong",
             ))
 
-    # 6. Mismatched Sender Domains
-    if score_sender_identity_here:
+    # 6. Suspicious sender-header diversion (Reply-To / Sender / Return-Path)
+    # Same-org subdomains and trusted ESPs are not mismatches. Only deception
+    # evidence (free-mail diversion, high-risk TLD, lookalike) raises a strong
+    # signal; plain organisational differences stay weak or are ignored.
+    if score_sender_identity_here and from_domain:
         sender_domain = extract_domain(parsed.sender_raw)
         reply_to_domain = extract_domain(parsed.reply_to_raw)
         return_path_domain = extract_domain(parsed.return_path_raw)
 
-        mismatches = []
-        if sender_domain and from_domain and sender_domain != from_domain:
-            mismatches.append(f"Sender ('{sender_domain}')")
-        if reply_to_domain and from_domain and reply_to_domain != from_domain:
-            mismatches.append(f"Reply-To ('{reply_to_domain}')")
-        if return_path_domain and from_domain and return_path_domain != from_domain:
-            mismatches.append(f"Return-Path ('{return_path_domain}')")
+        suspicious_parts: list[str] = []
+        unrelated_parts: list[str] = []
+        for label, other in (
+            ("Sender", sender_domain),
+            ("Reply-To", reply_to_domain),
+            ("Return-Path", return_path_domain),
+        ):
+            if not other or other == from_domain:
+                continue
+            relation = domain_relationship(from_domain, other)
+            if relation in ("same_org", "trusted_esp"):
+                continue
+            if relation == "suspicious":
+                suspicious_parts.append(f"{label} ('{other}')")
+            else:
+                unrelated_parts.append(f"{label} ('{other}')")
 
-        if mismatches:
+        if suspicious_parts:
             signals.append(_make_signal(
-                "Mismatched Sender Domains", 20,
-                "Header From domain does not align with transmitter or bounce address domains.",
-                f"From Domain: '{from_domain}' | Mismatches: {', '.join(mismatches)}",
+                "Suspicious Reply / Sender Diversion", 25,
+                "Header fields divert replies or bounce handling to a free-mail, "
+                "high-risk, or lookalike domain relative to From.",
+                f"From Domain: '{from_domain}' | Suspicious: {', '.join(suspicious_parts)}",
                 strength="strong",
+            ))
+        elif unrelated_parts:
+            signals.append(_make_signal(
+                "Different Sender Header Domains", 8,
+                "From differs from Sender/Reply-To/Return-Path without same-org or "
+                "trusted-ESP alignment. Different is not automatically malicious.",
+                f"From Domain: '{from_domain}' | Different: {', '.join(unrelated_parts)}",
+                strength="weak",
             ))
 
     # 10. Suspicious Keywords — weak; common in corporate and IdP mail
@@ -1183,6 +1225,9 @@ def score_message(
                     w, strength = 25, "strong"
                 elif "high-risk top-level" in title_lc or "raw ip" in title_lc:
                     w, strength = 20, "strong"
+                elif "reply-to" in title_lc or "return-path" in title_lc or "sender domain difference" in title_lc:
+                    # Org/header domain differences without deception evidence.
+                    w, strength = 8, "weak"
                 else:
                     w, strength = 10, "weak"
             signals.append(_make_signal(

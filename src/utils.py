@@ -258,6 +258,112 @@ TRUSTED_TRANSACTIONAL_DOMAINS = BRAND_OWNED_DOMAINS | {
     "postmarkapp.com", "mandrillapp.com", "sparkpostmail.com",
 }
 
+# Third-party mail / CRM / helpdesk infrastructure that routinely appears in
+# Sender, Reply-To, or Return-Path of legitimate organisational mail.
+# Consumer free-mail hosts are intentionally excluded — see FREE_MAIL_PROVIDERS.
+LEGITIMATE_ESP_DOMAINS = {
+    "sendgrid.net", "sendgrid.com",
+    "mailchimp.com", "mcsv.net", "mandrillapp.com",
+    "mailgun.org", "mailgun.com",
+    "amazonses.com", "amazonaws.com", "awsapps.com",
+    "postmarkapp.com", "sparkpostmail.com", "sparkpost.com",
+    "brevo.com", "sendinblue.com", "sibforms.com",
+    "unisender.com", "unisend.com",
+    "hubspotemail.net", "hubspot.com",
+    "salesforce.com", "force.com", "exacttarget.com",
+    "zendesk.com", "zendesk.email", "freshdesk.com", "freshworks.com",
+    "intercom-mail.com", "intercom.io",
+    "docusign.net", "docusign.com",
+    "zoho.eu", "zohomail.com",
+    "office365.com", "microsoftonline.com", "protection.outlook.com",
+    "google.com",
+    "constantcontact.com", "klaviyo.com", "campaign-archive.com",
+    "mailerlite.com", "convertkit.com", "substack.com",
+}
+
+# Consumer mailbox providers — Reply-To here from a non-free-mail From is a
+# classic reply-diversion lure (BEC / brand impersonation).
+FREE_MAIL_PROVIDERS = {
+    "gmail.com", "googlemail.com", "yahoo.com", "yahoo.co.uk", "ymail.com",
+    "hotmail.com", "outlook.com", "live.com", "msn.com", "aol.com",
+    "icloud.com", "me.com", "mail.com", "proton.me", "protonmail.com",
+    "gmx.com", "gmx.net", "zoho.com", "yandex.com", "yandex.ru",
+}
+
+
+def same_organization(domain_a: str, domain_b: str) -> bool:
+    """True when both hosts belong to the same organisational (registrable) domain.
+
+    ``mail.company.com``, ``support.company.com`` and ``company.com`` match.
+    ``giki.edu.pk`` and ``portal.giki.edu.pk`` match. Unrelated domains do not.
+    """
+    if not domain_a or not domain_b:
+        return False
+    a = domain_a.lower().strip(".")
+    b = domain_b.lower().strip(".")
+    if a == b:
+        return True
+    reg_a, reg_b = registrable_domain(a), registrable_domain(b)
+    if not reg_a or not reg_b:
+        return False
+    if reg_a == reg_b:
+        return True
+    # One host is a subdomain of the other's registrable domain.
+    if a == reg_b or a.endswith("." + reg_b) or b == reg_a or b.endswith("." + reg_a):
+        return True
+    return False
+
+
+def is_legitimate_esp(domain: str) -> bool:
+    """True when ``domain`` is (or is under) a known ESP / CRM mail platform."""
+    if not domain or is_free_mail_provider(domain):
+        return False
+    host = domain.lower().strip(".")
+    reg = registrable_domain(host)
+    if host in LEGITIMATE_ESP_DOMAINS or reg in LEGITIMATE_ESP_DOMAINS:
+        return True
+    return any(host == esp or host.endswith("." + esp) for esp in LEGITIMATE_ESP_DOMAINS)
+
+
+def is_free_mail_provider(domain: str) -> bool:
+    if not domain:
+        return False
+    reg = registrable_domain(domain.lower().strip("."))
+    return reg in FREE_MAIL_PROVIDERS
+
+
+def domain_relationship(from_domain: str, other_domain: str) -> str:
+    """Classify how ``other_domain`` relates to the From domain for header checks.
+
+    Returns one of: ``same_org``, ``trusted_esp``, ``suspicious``, ``unrelated``.
+
+    ``same_org`` / ``trusted_esp`` are normal enterprise patterns and must not
+    raise threat on their own. ``suspicious`` requires deception evidence
+    (free-mail diversion, high-risk TLD, lookalike). ``unrelated`` is a weak
+    signal only — different is not the same as malicious.
+    """
+    if not from_domain or not other_domain:
+        return "unrelated"
+    if same_organization(from_domain, other_domain):
+        return "same_org"
+
+    other_tld = other_domain.rsplit(".", 1)[-1].lower() if "." in other_domain else ""
+    from_is_free = is_free_mail_provider(from_domain)
+    other_is_free = is_free_mail_provider(other_domain)
+
+    # Reply diversion to a consumer mailbox from an org/brand From.
+    if other_is_free and not from_is_free:
+        return "suspicious"
+
+    if other_tld in HIGH_RISK_TLDS or looks_like_lookalike(other_domain):
+        return "suspicious"
+
+    if is_legitimate_esp(other_domain):
+        return "trusted_esp"
+
+    return "unrelated"
+
+
 # Brand tokens shorter than this are skipped by containment matching: short
 # tokens like 'ups' or 'dhl' collide with ordinary words ('follow-ups').
 BRAND_CONTAINMENT_MIN_LEN = 6
