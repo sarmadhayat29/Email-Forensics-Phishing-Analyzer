@@ -28,6 +28,7 @@ class User(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     email = Column(String(255), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     analyses = relationship("AnalysisRecord", back_populates="owner", cascade="all, delete-orphan")
@@ -56,4 +57,24 @@ class AnalysisRecord(Base):
 
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _ensure_user_full_name_column()
+
+
+def _ensure_user_full_name_column():
+    """Add users.full_name on existing databases created before the column existed."""
+    from sqlalchemy import text, inspect
+
+    try:
+        inspector = inspect(engine)
+        if "users" not in inspector.get_table_names():
+            return
+        columns = {col["name"] for col in inspector.get_columns("users")}
+        if "full_name" in columns:
+            return
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE users ADD COLUMN full_name VARCHAR(255)"))
+    except Exception:
+        # Best-effort migration; signup still works if the column already exists
+        # or the platform forbids ALTER (create_all covers new installs).
+        pass
 

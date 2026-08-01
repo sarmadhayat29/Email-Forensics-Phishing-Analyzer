@@ -1,7 +1,7 @@
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from db import User
 from auth import hash_password, verify_password
@@ -13,9 +13,21 @@ from api.security import login_limiter
 logger = get_logger(__name__)
 router = APIRouter()
 
+
 class AuthRequest(BaseModel):
     email: str
     password: str
+    full_name: Optional[str] = Field(default=None, max_length=255)
+
+
+def _user_payload(user: User) -> dict:
+    return {
+        "id": user.id,
+        "email": user.email,
+        "full_name": getattr(user, "full_name", None),
+        "created_at": format_iso(user.created_at),
+    }
+
 
 @router.post("/signup")
 def signup(req: AuthRequest, db: Session = Depends(get_db)):
@@ -23,8 +35,16 @@ def signup(req: AuthRequest, db: Session = Depends(get_db)):
         email = req.email.strip().lower()
         if not email or "@" not in email:
             raise HTTPException(status_code=400, detail="Invalid email address.")
-        if not req.password or len(req.password) < 6:
-            raise HTTPException(status_code=400, detail="Password must be at least 6 characters.")
+        if not req.password or len(req.password) < 8:
+            raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
+        if req.password != req.password.strip():
+            raise HTTPException(status_code=400, detail="Password cannot start or end with spaces.")
+
+        full_name = (req.full_name or "").strip() or None
+        if not full_name:
+            raise HTTPException(status_code=400, detail="Full name is required.")
+        if len(full_name) < 2:
+            raise HTTPException(status_code=400, detail="Full name must be at least 2 characters.")
 
         existing = db.query(User).filter(User.email == email).first()
         if existing:
@@ -32,7 +52,8 @@ def signup(req: AuthRequest, db: Session = Depends(get_db)):
 
         new_user = User(
             email=email,
-            password_hash=hash_password(req.password)
+            password_hash=hash_password(req.password),
+            full_name=full_name,
         )
         db.add(new_user)
         db.commit()
@@ -42,17 +63,14 @@ def signup(req: AuthRequest, db: Session = Depends(get_db)):
         return {
             "access_token": token,
             "token_type": "bearer",
-            "user": {
-                "id": new_user.id,
-                "email": new_user.email,
-                "created_at": format_iso(new_user.created_at)
-            }
+            "user": _user_payload(new_user),
         }
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Signup error: {e}")
         raise HTTPException(status_code=500, detail="Registration failed due to an internal server error.")
+
 
 @router.post("/login", dependencies=[Depends(login_limiter)])
 def login(req: AuthRequest, db: Session = Depends(get_db)):
@@ -67,11 +85,7 @@ def login(req: AuthRequest, db: Session = Depends(get_db)):
         return {
             "access_token": token,
             "token_type": "bearer",
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "created_at": format_iso(user.created_at)
-            }
+            "user": _user_payload(user),
         }
     except HTTPException:
         raise
@@ -79,16 +93,12 @@ def login(req: AuthRequest, db: Session = Depends(get_db)):
         logger.error(f"Login error: {e}")
         raise HTTPException(status_code=500, detail="Login failed due to an internal server error.")
 
+
 @router.get("/me")
 def get_me(user: Optional[User] = Depends(get_current_user)):
     if not user:
         return {"authenticated": False, "user": None}
     return {
         "authenticated": True,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "created_at": format_iso(user.created_at)
-        }
+        "user": _user_payload(user),
     }
-
