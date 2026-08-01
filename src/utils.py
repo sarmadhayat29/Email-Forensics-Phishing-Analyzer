@@ -400,14 +400,24 @@ def url_is_risky(url: str) -> str | None:
 # --- Attachment signature sniffing (no external deps) --------------------
 
 
+# Longer signatures are listed before any shorter signature they start with, so
+# the first match is always the most specific one.
 MAGIC_SIGNATURES = [
     (b"MZ", "exe"),
+    (b"\x7fELF", "elf"),
     (b"%PDF", "pdf"),
     (b"PK\x03\x04", "zip/office"),
     (b"\xff\xd8\xff", "jpg"),
     (b"\x89PNG", "png"),
+    (b"GIF8", "gif"),
     (b"%!PS", "ps"),
     (b"\xd0\xcf\x11\xe0", "ole/doc-xls-ppt"),
+    (b"{\\rtf", "rtf"),
+    (b"7z\xbc\xaf\x27\x1c", "7z"),
+    (b"Rar!\x1a\x07", "rar"),
+    (b"MSCF", "cab"),
+    # Windows shortcut: fixed 0x4C header length followed by the LNK class id.
+    (b"\x4c\x00\x00\x00\x01\x14\x02\x00", "lnk"),
 ]
 
 RISKY_EXTENSIONS = {

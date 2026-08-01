@@ -24,6 +24,32 @@ class Attachment:
     is_password_protected: bool = False
     suspicious_name_flag: bool = False
     findings: list[str] = field(default_factory=list)
+    #: True when the attachment's bytes were available and structurally read
+    #: (archive directory, OLE directory, PDF body), as opposed to judged from
+    #: its name alone. Distinguishes "clean" from "not examined".
+    content_inspected: bool = False
+    #: Machine keys of the content-verified observations, e.g.
+    #: ``archive_encrypted`` or ``pdf_javascript``. See :mod:`attachment_content`.
+    risky_features: list[str] = field(default_factory=list)
+
+
+#: Attribute carrying an attachment's decoded bytes from the parsing stage to
+#: the forensics stage. Deliberately *not* a dataclass field: a Finding is
+#: serialised with ``dataclasses.asdict`` into JSON reports and a JSONB column,
+#: and raw payload bytes are neither JSON-serialisable nor useful to a reader.
+CONTENT_ATTR = "_content_bytes"
+
+
+def set_attachment_content(attachment: Attachment, data: bytes) -> None:
+    """Stash decoded attachment bytes for later content inspection."""
+    if data:
+        setattr(attachment, CONTENT_ATTR, bytes(data))
+
+
+def attachment_content(attachment: Attachment) -> bytes:
+    """The attachment's decoded bytes, or empty when they were not preserved."""
+    data = getattr(attachment, CONTENT_ATTR, b"")
+    return data if isinstance(data, bytes) else b""
 
 
 @dataclass
@@ -153,6 +179,28 @@ class HtmlFinding:
     evidence: str = ""
     explanation: str = ""
     #: Supplementary measurement or threshold note for the analyst.
+    detail: str = ""
+
+
+@dataclass
+class SenderHistory:
+    """How often the recipient of this message has heard from this sender.
+
+    Only meaningful when ``available`` is True, which requires both a resolvable
+    sender address and enough prior analyses for "first contact" to mean
+    anything. Scoring treats an unavailable history as no information at all —
+    the CLI, which has no user account, never produces one.
+    """
+    available: bool = False
+    address: str = ""
+    domain: str = ""
+    #: Prior analyses inspected for this user (excluding the current message).
+    prior_messages: int = 0
+    #: How many of those came from this exact address / registrable domain.
+    address_count: int = 0
+    domain_count: int = 0
+    first_time_address: bool = False
+    first_time_domain: bool = False
     detail: str = ""
 
 

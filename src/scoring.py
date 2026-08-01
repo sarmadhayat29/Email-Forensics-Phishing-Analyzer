@@ -5,10 +5,17 @@ transparent, weighted risk signals with evidence for SOC analysts.
 """
 
 import re
+from collections import defaultdict
 from typing import Optional, List
 from models import (
     ParsedMessage, AuthVerdict, RoutingVerdict, PhishingSignal, ScoringVerdict,
     HeaderAnalysisVerdict, URLAnalysisVerdict, DomainAgeFinding, HtmlFinding,
+    SenderHistory,
+)
+from attachment_content import (
+    ARCHIVE_CONTAINS_EXECUTABLE, ARCHIVE_DOUBLE_EXTENSION_ENTRY, ARCHIVE_ENCRYPTED,
+    ARCHIVE_NESTED, OFFICE_ENCRYPTED, OFFICE_VBA_MACRO, PDF_EMBEDDED_FILE,
+    PDF_JAVASCRIPT, PDF_LAUNCH_ACTION, PDF_OPEN_ACTION, TYPE_MISMATCH,
 )
 from html_analysis import (
     ACTIVE_CONTENT, COMMENT_OBFUSCATION, CREDENTIAL_FORM, DATA_URI_HTML, DATA_URI_OTHER,
@@ -112,6 +119,9 @@ SIGNAL_FAMILIES = [
     # but belongs to the reputation family, not to link analysis.
     ("domain reputation", ("domain reputation",)),
     ("link forensics", ("link", "hyperlink", "redirect", "shortener")),
+    # Must precede "sender identity": a first-contact indicator is about the
+    # relationship with the sender, not about how the sender looks.
+    ("sender history", ("sender history",)),
     ("sender identity", ("display name", "lookalike", "typosquat", "top-level domain",
                          "punycode", "mismatched sender")),
 ]
@@ -145,6 +155,7 @@ def assess_confidence(
     signals: List[PhishingSignal],
     domain_age_findings: Optional[List[DomainAgeFinding]] = None,
     html_findings: Optional[List[HtmlFinding]] = None,
+    sender_history: Optional[SenderHistory] = None,
 ) -> tuple[Optional[int], str]:
     """Estimate how much verifiable evidence backs the verdict.
 
@@ -189,6 +200,12 @@ def assess_confidence(
     # message or a caller that does not run the stage.
     if html_findings is not None and parsed.body_html:
         factors.append(("structural analysis of the HTML body", True))
+
+    # Knowing whether this recipient has corresponded with this sender before is
+    # evidence the message itself cannot supply. Only weighed when a baseline was
+    # actually available, so the CLI (which keeps no history) is not penalised.
+    if sender_history is not None and getattr(sender_history, "available", False):
+        factors.append(("prior correspondence baseline for this recipient", True))
 
     # Corroboration only applies when something actually fired; a message with
     # no indicators is not "less certain" for lacking them.
@@ -500,6 +517,176 @@ def _score_html_findings(findings: Optional[List[HtmlFinding]]) -> List[Phishing
     return signals
 
 
+# --- Attachment content forensics ----------------------------------------
+#
+# Weights for the observations that come from reading an attachment's bytes
+# rather than its name (see :mod:`attachment_content`). Content-verified
+# evidence outweighs the equivalent name-based guess, because "the ZIP
+# encryption flag is set" and "the filename contains the word encrypted" are not
+# the same claim. As with every other family the total is capped, so a single
+# archive cannot decide a verdict on its own.
+CONTENT_FEATURE_WEIGHTS: dict[str, tuple[int, str]] = {
+    ARCHIVE_CONTAINS_EXECUTABLE: (
+        35, "archive contains an executable or script entry (verified from the archive directory)"),
+    ARCHIVE_DOUBLE_EXTENSION_ENTRY: (
+        35, "archive entry uses double-extension masking (verified from the archive directory)"),
+    OFFICE_VBA_MACRO: (
+        30, "a VBA macro project is physically present in the document"),
+    PDF_LAUNCH_ACTION: (
+        30, "PDF carries a /Launch action that starts an external program"),
+    ARCHIVE_ENCRYPTED: (
+        25, "archive encryption flag is set, so the payload cannot be scanned"),
+    OFFICE_ENCRYPTED: (
+        25, "document is password-protected (OLE EncryptedPackage), so it cannot be scanned"),
+    TYPE_MISMATCH: (
+        25, "the file signature contradicts the declared extension"),
+    PDF_JAVASCRIPT: (
+        20, "PDF embeds JavaScript"),
+    PDF_OPEN_ACTION: (
+        15, "PDF runs an action automatically when opened"),
+    PDF_EMBEDDED_FILE: (
+        15, "PDF carries an embedded file payload"),
+    ARCHIVE_NESTED: (
+        15, "archive is nested inside another archive, a common gateway-evasion layering"),
+}
+
+
+# --- Sender history (BEC first-contact baselining) -------------------------
+#
+# A first contact is only interesting in context: on its own it describes every
+# legitimate new correspondent, so the standalone weight is deliberately token.
+# The combination that matters is a first-contact domain *plus* payment or
+# credential language already detected in the body, which is the shape of vendor
+# impersonation and invoice fraud.
+#
+# The signal is only produced when a real baseline exists (see
+# :data:`sender_history.MIN_PRIOR_MESSAGES`), and the family cap keeps it firmly
+# in corroborating territory: it can lift a suspicious message into the next
+# band but can never carry a verdict by itself.
+SENDER_HISTORY_BEC_INDICATORS = {
+    "Fake Invoice / BEC Indicators",
+    "Financial Scam Language",
+    "Credential Harvesting Language",
+    "Password Reset Scam Language",
+}
+
+FIRST_CONTACT_WITH_PAYMENT_WEIGHT = 15
+FIRST_CONTACT_DOMAIN_WEIGHT = 5
+FIRST_CONTACT_ADDRESS_WEIGHT = 3
+
+#: Hard ceiling on the combined weight of all sender-history signals.
+MAX_SENDER_HISTORY_SCORE = 15
+
+
+def _score_sender_history(
+    history: Optional[SenderHistory],
+    fired_indicators: set,
+) -> List[PhishingSignal]:
+    if not history or not getattr(history, "available", False):
+        return []
+
+    evidence = getattr(history, "detail", "") or ""
+    financial_context = sorted(fired_indicators & SENDER_HISTORY_BEC_INDICATORS)
+
+    if history.first_time_domain and financial_context:
+        return [PhishingSignal(
+            indicator="Sender History: First Contact Requesting Payment or Credentials",
+            weight=FIRST_CONTACT_WITH_PAYMENT_WEIGHT,
+            explanation="This recipient has never received mail from this domain, yet the message "
+                        "asks for payment or credentials. That combination is the standard shape of "
+                        "vendor impersonation and invoice fraud.",
+            evidence=f"{evidence} | Corroborating content: {', '.join(financial_context)}",
+        )]
+
+    if history.first_time_domain:
+        return [PhishingSignal(
+            indicator="Sender History: First Contact from Unfamiliar Domain",
+            weight=FIRST_CONTACT_DOMAIN_WEIGHT,
+            explanation="No previously analysed message for this recipient came from this domain. "
+                        "Ordinary for a genuine new correspondent, so this is context rather than "
+                        "an accusation.",
+            evidence=evidence,
+        )]
+
+    if history.first_time_address:
+        return [PhishingSignal(
+            indicator="Sender History: First Contact from New Address at a Known Domain",
+            weight=FIRST_CONTACT_ADDRESS_WEIGHT,
+            explanation="The domain is an established correspondent but this individual address is "
+                        "new, which is what both a new colleague and a look-alike mailbox look like.",
+            evidence=evidence,
+        )]
+
+    return []
+
+
+# --- Per-family saturation ------------------------------------------------
+#
+# Evidence within one family is heavily correlated: five header findings about
+# the same forged From are one observation reported five times, and a message
+# with thirty links can trip the same link detector thirty times. Summing them
+# lets a single stage — or a single verbose detector — accumulate its way to
+# Critical from one line of evidence.
+#
+# Each family therefore saturates at a cap. Budget is allocated strongest-signal
+# first, so the most severe evidence in a family is always the part that scores;
+# weaker signals above the cap remain in the report (analysts still need to see
+# them) but stop contributing weight.
+#
+# Caps are chosen so that no single family can reach Critical (90 display) on its
+# own, while leaving realistic single-family evidence untouched:
+#
+#   * authentication 75 — SPF+DKIM+DMARC hard failures (85) saturate to High,
+#     and an unbounded list of inconsistency lines can no longer pile on;
+#   * header forensics 70 — one forged identity produces several findings;
+#   * link forensics 60 and message content 60 — a link farm or a
+#     keyword-dense body needs corroboration from another family to escalate;
+#   * sender identity 45 and attachment forensics 45 — strong but never
+#     conclusive alone;
+#   * routing, HTML, domain reputation and sender history keep the caps their
+#     own stages already enforce.
+FAMILY_SCORE_CAPS: dict[str, int] = {
+    "authentication": 75,
+    "header forensics": 70,
+    "link forensics": 60,
+    "message content": 60,
+    "sender identity": 45,
+    "attachment forensics": 45,
+    "routing forensics": 45,
+    "html body forensics": MAX_HTML_SCORE,
+    "domain reputation": MAX_DOMAIN_AGE_SCORE,
+    "sender history": MAX_SENDER_HISTORY_SCORE,
+}
+
+
+def _apply_family_caps(signals: List[PhishingSignal]) -> List[PhishingSignal]:
+    """Saturate each evidence family at its cap, strongest signal first.
+
+    Signals are mutated in place and the list order (which drives report
+    ordering) is preserved, so capping changes what a signal *contributes*, never
+    whether the analyst sees it.
+    """
+    grouped: dict[str, List[tuple[int, PhishingSignal]]] = defaultdict(list)
+    for position, signal in enumerate(signals):
+        grouped[_signal_family(signal.indicator)].append((position, signal))
+
+    for family, entries in grouped.items():
+        cap = FAMILY_SCORE_CAPS.get(family)
+        if cap is None:
+            continue
+        total = sum(signal.weight for _, signal in entries)
+        if total <= cap:
+            continue
+        budget = cap
+        for _, signal in sorted(entries, key=lambda entry: (-entry[1].weight, entry[0])):
+            allowed = max(0, min(signal.weight, budget))
+            signal.weight = allowed
+            budget -= allowed
+        logger.debug(f"Family '{family}' saturated at its {cap}-point cap (raw total {total}).")
+
+    return signals
+
+
 def _bucket(display_score: int) -> str:
     if display_score < 0:
         return "Low"
@@ -517,6 +704,7 @@ def score_message(
     url_verdict: Optional[URLAnalysisVerdict] = None,
     domain_age_findings: Optional[List[DomainAgeFinding]] = None,
     html_findings: Optional[List[HtmlFinding]] = None,
+    sender_history: Optional[SenderHistory] = None,
 ) -> ScoringVerdict:
     logger.debug("Executing 15-category Phishing Indicator Scoring Engine.")
     signals: List[PhishingSignal] = []
@@ -778,6 +966,7 @@ def score_message(
         filename = att.filename
         ext = att.declared_extension or ""
         reasons: List[tuple[int, str]] = []
+        content_features = set(getattr(att, "risky_features", None) or [])
 
         if getattr(att, "has_double_extension", False) or has_double_extension(filename):
             reasons.append((35, "double extension masking the real file type (e.g. invoice.pdf.exe)"))
@@ -787,10 +976,18 @@ def score_message(
             reasons.append((30, f"script payload (extension '.{ext}')"))
         if att.true_type == "exe" and ext not in {"exe", "dll", "scr", "com"}:
             reasons.append((30, f"true file signature is executable but extension is '.{ext}'"))
-        if getattr(att, "is_macro_enabled", False):
+        # The name-based macro and encryption reasons are skipped when the
+        # content inspector proved the same thing: the verified observation
+        # below carries the weight, and saying it twice only pads the evidence.
+        if getattr(att, "is_macro_enabled", False) and OFFICE_VBA_MACRO not in content_features:
             reasons.append((25, f"macro-enabled Office document (extension '.{ext}')"))
-        if getattr(att, "is_password_protected", False):
+        if (getattr(att, "is_password_protected", False)
+                and not content_features & {ARCHIVE_ENCRYPTED, OFFICE_ENCRYPTED}):
             reasons.append((20, "password-protected archive that cannot be scanned"))
+        for feature in getattr(att, "risky_features", None) or []:
+            rule = CONTENT_FEATURE_WEIGHTS.get(feature)
+            if rule:
+                reasons.append(rule)
         if getattr(att, "suspicious_name_flag", False):
             reasons.append((10, "social-engineering lure or randomised filename"))
 
@@ -810,10 +1007,19 @@ def score_message(
             evidence=f"Filename: '{filename}' | Issues: {detail}"
         ))
 
+    # --- Sender history (first contact, BEC baselining) ---
+    # Evaluated last because it reads which content signals already fired: a
+    # first contact only escalates when the message also asks for money or
+    # credentials. Absent in the CLI, which keeps no correspondence history.
+    signals.extend(_score_sender_history(sender_history, {s.indicator for s in signals}))
+
+    # --- Per-family saturation (applied to every family at once) ---
+    _apply_family_caps(signals)
+
     total = sum(s.weight for s in signals)
     display = to_display_score(total)
     confidence, confidence_label = assess_confidence(
-        parsed, auth, routing, signals, domain_age_findings, html_findings
+        parsed, auth, routing, signals, domain_age_findings, html_findings, sender_history
     )
     logger.info(f"Message scored {display}/100 ({_bucket(display)} risk, raw weight total {total}).")
 

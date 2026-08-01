@@ -7,7 +7,7 @@ and attachments (with hashes and true-type sniffing).
 from email.message import Message
 
 from utils import hash_bytes, sniff_true_type, file_extension
-from models import ParsedMessage, Attachment
+from models import ParsedMessage, Attachment, set_attachment_content
 from ingest import RAW_BYTES_ATTR
 from exceptions import ParsingError
 from logger import get_logger
@@ -151,6 +151,10 @@ def _extract_attachments(msg: Message) -> tuple[list[Attachment], list[Attachmen
             hashes=hash_bytes(payload) if payload else {},
             content_id=str(content_id) if content_id else None
         )
+        # Kept off the dataclass so reports and API payloads stay
+        # JSON-serialisable; the forensics stage reads it for content checks.
+        set_attachment_content(att, payload)
+
         
         if is_inline and (part.get_content_maintype() == "image" or content_id):
             embedded_images.append(att)
