@@ -11,13 +11,19 @@ import AboutPage from './pages/AboutPage';
 import AuthPage from './pages/AuthPage';
 
 const ProtectedRoute = ({ children }) => {
-  const { user } = useAuth();
+  const { user, authLoading } = useAuth();
+  if (authLoading) {
+    return <div className="h-screen w-full bg-soc-bg" />;
+  }
   if (!user) return <Navigate to="/login" replace />;
   return children;
 };
 
 const PublicRoute = ({ children }) => {
-  const { user } = useAuth();
+  const { user, authLoading } = useAuth();
+  if (authLoading) {
+    return <div className="h-screen w-full bg-soc-bg" />;
+  }
   if (user) return <Navigate to="/dashboard" replace />;
   return children;
 };
