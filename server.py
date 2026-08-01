@@ -11,8 +11,9 @@ import sys
 # Insert src directory to Python path BEFORE importing routes
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), 'src')))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from contextlib import asynccontextmanager
 
@@ -61,10 +62,75 @@ app.include_router(analysis.router, prefix="/api", tags=["analysis"])
 app.include_router(history.router, prefix="/api/analyses", tags=["history"])
 app.include_router(reports.router, prefix="/api/report", tags=["reports"])
 
-# Serve frontend static files if dist directory exists
-dist_dir = os.path.join(os.path.dirname(__file__), "frontend", "dist")
-if os.path.exists(dist_dir):
-    app.mount("/", StaticFiles(directory=dist_dir, html=True), name="static")
+# ---------------------------------------------------------------------------
+# SPA static hosting (React + Vite + React Router BrowserRouter)
+#
+# Production serves frontend/dist from this same process (see Procfile).
+# Client-side routes like /dashboard and /analysis/:id are not real files on
+# disk. StaticFiles(html=True) only serves index.html for directories / missing
+# 404.html — it does NOT fall back to index.html for arbitrary paths, so a
+# browser refresh on a deep link returned 404. The catch-all below serves
+# real dist assets when they exist, otherwise index.html so React Router can
+# resolve the path. API routers registered above always take precedence.
+# ---------------------------------------------------------------------------
+DIST_DIR = os.path.join(os.path.dirname(__file__), "frontend", "dist")
+
+
+def resolve_spa_file(dist_dir: str, full_path: str) -> str:
+    """Return the filesystem path to serve for a browser request.
+
+    Real files under ``dist_dir`` (favicon, SVG, etc.) are returned as-is.
+    Everything else — including React Router paths like ``dashboard`` or
+    ``analysis/123`` — resolves to ``index.html`` so the SPA can boot.
+    """
+    index_path = os.path.join(dist_dir, "index.html")
+    if not full_path or full_path in {".", "/"}:
+        return index_path
+
+    safe_root = os.path.abspath(dist_dir)
+    candidate = os.path.abspath(os.path.join(dist_dir, full_path))
+    if candidate.startswith(safe_root + os.sep) and os.path.isfile(candidate):
+        return candidate
+    return index_path
+
+
+def _serve_spa_index() -> FileResponse:
+    index_path = os.path.join(DIST_DIR, "index.html")
+    if not os.path.isfile(index_path):
+        raise HTTPException(
+            status_code=404,
+            detail="Frontend build not found. Run npm run build in frontend/.",
+        )
+    return FileResponse(index_path)
+
+
+if os.path.isdir(DIST_DIR):
+    assets_dir = os.path.join(DIST_DIR, "assets")
+    if os.path.isdir(assets_dir):
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/")
+    async def spa_root():
+        return _serve_spa_index()
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        # Never shadow API with the SPA shell.
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+
+        target = resolve_spa_file(DIST_DIR, full_path)
+        if not os.path.isfile(target):
+            raise HTTPException(
+                status_code=404,
+                detail="Frontend build not found. Run npm run build in frontend/.",
+            )
+        return FileResponse(target)
+else:
+    logger.warning(
+        "frontend/dist not found — API-only mode. "
+        "Build the SPA with: cd frontend && npm run build"
+    )
 
 if __name__ == "__main__":
     import uvicorn
