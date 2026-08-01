@@ -39,19 +39,29 @@ export default function InvestigationScreen() {
     <div className="space-y-6">
       
       {/* Local header for actions since they were removed from App.jsx header */}
-      <div className="flex items-center justify-between bg-soc-card p-4 rounded-2xl border border-emerald-900/40 shadow-xl mb-6">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-soc-card p-3 sm:p-4 rounded-2xl border border-emerald-900/40 shadow-xl mb-4 sm:mb-6">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-wrap">
+          <button
+            type="button"
+            onClick={() => navigate('/history')}
+            className="min-h-11 min-w-11 inline-flex items-center justify-center rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-soc-hover border border-emerald-900/40 transition"
+            aria-label="Back to history"
+          >
+            <ArrowLeft className="w-4 h-4" />
+          </button>
           <h2 className="font-bold text-sm text-slate-100">Investigation Record</h2>
-          <span className="px-2.5 py-0.5 bg-soc-bg border border-emerald-900/50 text-cyan-400 font-mono text-xs rounded">ID: {id.substring(0, 8)}</span>
+          <span className="px-2.5 py-0.5 bg-soc-bg border border-emerald-900/50 text-cyan-400 font-mono text-xs rounded">
+            ID: {id.substring(0, 8)}
+          </span>
         </div>
-        <div className="flex items-center gap-2">
-          <DownloadReportButton fileId={id} type="html" className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-lg text-xs font-bold flex items-center gap-1.5">
+        <div className="flex items-center gap-2 flex-wrap">
+          <DownloadReportButton fileId={id} type="html" className="min-h-11 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-lg text-xs font-bold flex items-center gap-1.5">
             HTML
           </DownloadReportButton>
-          <DownloadReportButton fileId={id} type="pdf" className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5">
+          <DownloadReportButton fileId={id} type="pdf" className="min-h-11 px-3 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5">
             PDF
           </DownloadReportButton>
-          <DownloadReportButton fileId={id} type="json" className="px-3 py-1.5 bg-soc-bg hover:bg-slate-800 border border-emerald-900/60 rounded-lg text-xs font-bold flex items-center gap-1.5 text-slate-200">
+          <DownloadReportButton fileId={id} type="json" className="min-h-11 px-3 py-2 bg-soc-bg hover:bg-slate-800 border border-emerald-900/60 rounded-lg text-xs font-bold flex items-center gap-1.5 text-slate-200">
             <FileCode className="w-3.5 h-3.5" /> JSON
           </DownloadReportButton>
         </div>
@@ -82,14 +92,14 @@ export default function InvestigationScreen() {
               <div key={idx} className="relative">
                 <div className="absolute -left-[31px] top-0.5 w-4 h-4 rounded-full bg-emerald-950 border-2 border-emerald-500 flex items-center justify-center text-emerald-400" />
                 <div className="p-3.5 bg-soc-bg border border-emerald-900/40 rounded-xl space-y-1.5">
-                  <div className="flex items-center justify-between text-[11px]">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px]">
                     <span className="font-bold text-emerald-400">Hop #{hop.hop_number} Relay</span>
-                    <span className="text-slate-400">{hop.timestamp} ({hop.delay_display})</span>
+                    <span className="text-slate-400 break-words">{hop.timestamp} ({hop.delay_display})</span>
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-[11px]">
-                    <div><span className="text-slate-500 block text-[10px]">From</span><span className="text-slate-200 font-bold truncate block">{hop.from_host}</span></div>
-                    <div><span className="text-slate-500 block text-[10px]">By</span><span className="text-slate-200 font-bold truncate block">{hop.by_host}</span></div>
-                    <div><span className="text-slate-500 block text-[10px]">IP</span><span className="text-cyan-300 truncate block">{hop.ip_info}</span></div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+                    <div className="min-w-0"><span className="text-slate-500 block text-[10px]">From</span><span className="text-slate-200 font-bold break-anywhere block">{hop.from_host}</span></div>
+                    <div className="min-w-0"><span className="text-slate-500 block text-[10px]">By</span><span className="text-slate-200 font-bold break-anywhere block">{hop.by_host}</span></div>
+                    <div className="min-w-0"><span className="text-slate-500 block text-[10px]">IP</span><span className="text-cyan-300 break-anywhere block">{hop.ip_info}</span></div>
                   </div>
                 </div>
               </div>

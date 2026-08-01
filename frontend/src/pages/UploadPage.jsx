@@ -86,25 +86,25 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto py-8 space-y-6">
+    <div className="max-w-2xl mx-auto py-4 sm:py-8 space-y-6 px-0">
       <ErrorBanner error={error} onDismiss={() => setError(null)} />
       
       {uploadProgress > 0 && uploadProgress < 100 ? (
-        <div className="p-8 bg-soc-card border border-emerald-900/40 rounded-3xl text-center shadow-2xl">
+        <div className="p-5 sm:p-8 bg-soc-card border border-emerald-900/40 rounded-2xl sm:rounded-3xl text-center shadow-2xl">
           <UploadCloud className="w-12 h-12 mx-auto text-emerald-400 animate-bounce mb-3" />
-          <h3 className="text-lg font-bold text-slate-100">Uploading Payload {filename}</h3>
+          <h3 className="text-base sm:text-lg font-bold text-slate-100 break-anywhere">Uploading Payload {filename}</h3>
           <div className="w-full bg-soc-bg h-3 rounded-full overflow-hidden border border-emerald-950 my-4">
             <div className="bg-emerald-500 h-full transition-all duration-150 rounded-full" style={{ width: `${uploadProgress}%` }}></div>
           </div>
           <span className="text-xs font-mono text-emerald-400 font-bold">{uploadProgress}% Upload Completed</span>
         </div>
       ) : uploadProgress === 100 ? (
-        <div className="p-8 bg-soc-card border border-emerald-900/40 rounded-3xl text-center shadow-2xl">
+        <div className="p-5 sm:p-8 bg-soc-card border border-emerald-900/40 rounded-2xl sm:rounded-3xl text-center shadow-2xl">
           <RefreshCw className="w-12 h-12 mx-auto text-emerald-400 animate-spin mb-3" />
-          <h3 className="text-lg font-bold text-slate-100 mb-1">Analyzing Forensic Payload</h3>
+          <h3 className="text-base sm:text-lg font-bold text-slate-100 mb-1">Analyzing Forensic Payload</h3>
           <p className="text-xs font-mono text-cyan-400 mb-6">{analysisSteps[analysisStep]}</p>
           
-          <div className="space-y-2.5 text-left bg-soc-bg p-5 rounded-2xl border border-emerald-950 text-xs font-mono">
+          <div className="space-y-2.5 text-left bg-soc-bg p-4 sm:p-5 rounded-2xl border border-emerald-950 text-xs font-mono">
             {analysisSteps.map((stepText, idx) => (
               <div key={idx} className="flex items-center gap-3">
                 {idx < analysisStep ? (
@@ -121,15 +121,18 @@ export default function UploadPage() {
         </div>
       ) : (
         <div
-          className="p-12 border-2 border-dashed border-emerald-900/60 hover:border-emerald-500 bg-soc-card hover:bg-soc-hover rounded-3xl cursor-pointer text-center transition group shadow-2xl"
+          className="p-8 sm:p-12 border-2 border-dashed border-emerald-900/60 hover:border-emerald-500 bg-soc-card hover:bg-soc-hover rounded-2xl sm:rounded-3xl cursor-pointer text-center transition group shadow-2xl min-h-[12rem] flex flex-col items-center justify-center"
           onClick={() => fileInputRef.current?.click()} onDrop={handleDrop} onDragOver={e => e.preventDefault()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') fileInputRef.current?.click(); }}
         >
           <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".eml,.msg" className="hidden" />
           <div className="w-16 h-16 mx-auto mb-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-400 group-hover:scale-110 transition">
             <UploadCloud className="w-8 h-8" />
           </div>
-          <h3 className="text-lg font-bold text-slate-100 mb-1">Upload Target Email Payload</h3>
-          <p className="text-xs text-slate-400 font-mono">Drag &amp; drop raw <code className="text-emerald-400">.eml</code> or Outlook <code className="text-emerald-400">.msg</code> files</p>
+          <h3 className="text-base sm:text-lg font-bold text-slate-100 mb-1">Upload Target Email Payload</h3>
+          <p className="text-xs text-slate-400 font-mono px-2">Drag &amp; drop raw <code className="text-emerald-400">.eml</code> or Outlook <code className="text-emerald-400">.msg</code> files</p>
         </div>
       )}
     </div>
