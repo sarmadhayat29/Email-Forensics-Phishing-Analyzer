@@ -222,6 +222,7 @@ BRAND_OWNED_DOMAINS = {
     "microsoft.com", "microsoftonline.com", "office.com", "office365.com",
     "live.com", "outlook.com", "hotmail.com", "msn.com", "sharepoint.com",
     "onedrive.com", "azure.com", "windows.com", "skype.com", "xbox.com",
+    "accountprotection.microsoft.com",
     "google.com", "gmail.com", "googlemail.com", "youtube.com",
     "googleapis.com", "gstatic.com", "withgoogle.com",
     "apple.com", "icloud.com", "me.com",
@@ -241,6 +242,20 @@ BRAND_OWNED_DOMAINS = {
     "chase.com", "bankofamerica.com", "wellsfargo.com", "citibank.com",
     "barclays.co.uk", "hsbc.com", "schwab.com", "fidelity.com",
     "verizon.com", "att.com",
+    # Developer / SaaS platforms frequently spoofed and frequently legitimate
+    "github.com", "githubusercontent.com", "githubcopilot.com",
+    "gitlab.com", "bitbucket.org", "atlassian.com", "atlassian.net",
+    "slack.com", "zoom.us", "notion.so", "figma.com",
+    "salesforce.com", "force.com", "hubspot.com", "shopify.com",
+}
+
+# Additional transactional / notification domains that are not brand lookalike
+# targets but routinely send password-reset and security language.
+TRUSTED_TRANSACTIONAL_DOMAINS = BRAND_OWNED_DOMAINS | {
+    "github.com", "noreply.github.com",
+    "email.apple.com", "email.microsoft.com",
+    "amazonses.com", "sendgrid.net", "mailchimp.com", "mailgun.org",
+    "postmarkapp.com", "mandrillapp.com", "sparkpostmail.com",
 }
 
 # Brand tokens shorter than this are skipped by containment matching: short

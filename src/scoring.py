@@ -27,41 +27,52 @@ from utils import (
     looks_like_lookalike, is_punycode_or_unicode,
     detect_redirect_param, has_double_extension, RISKY_EXTENSIONS,
     KNOWN_BRAND_DOMAINS, build_match_text, normalize_text,
-    HIGH_RISK_TLDS,
+    HIGH_RISK_TLDS, registrable_domain, TRUSTED_TRANSACTIONAL_DOMAINS,
 )
 from logger import get_logger
 
 logger = get_logger(__name__)
 
 # Pattern matcher sets
+# Credential language is strong: it asks the reader to surrender secrets.
 CREDENTIAL_PATTERNS = [
     r"\bconfirm\s+(?:your\s+)?password\b", r"\bverify\s+(?:your\s+)?account\b",
     r"\blogin\s+to\s+(?:restore|verify|update)\b", r"\bupdate\s+billing\b",
     r"\baccount\s+suspended\b", r"\bsecurity\s+checkpoint\b", r"\benter\s+credentials\b"
 ]
 
+# Urgency alone is weak — legitimate business mail uses deadlines constantly.
 URGENCY_PATTERNS = [
     r"\bimmediate\s+action\s+required\b", r"\bwithin\s+24\s+hours\b",
     r"\baccount\s+will\s+be\s+(?:closed|terminated|suspended)\b",
     r"\burgent\s+notice\b", r"\brespond\s+immediately\b", r"\bfinal\s+warning\b"
 ]
 
+# Keep only phrases that imply *outbound payment fraud*, not ordinary receipts.
+# Removed: "payment confirmation", "bank deposit" (Amazon/Chase/PayPal FP sources).
 FINANCIAL_PATTERNS = [
     r"\bwire\s+transfer\b", r"\bbitcoin\b", r"\bcrypto\s+payment\b",
-    r"\bgift\s+card\b", r"\boverdue\s+payment\b", r"\bpayment\s+confirmation\b",
-    r"\bbank\s+deposit\b", r"\btransfer\s+funds\b"
+    r"\bgift\s+card\b", r"\boverdue\s+payment\b",
+    r"\btransfer\s+funds\b"
 ]
 
+# Invoice language is common in legitimate billing. Kept as a weak indicator;
+# High risk requires corroboration (urgency, spoofing, bad TLD, auth failure).
+# Removed: "receipt for your payment" (PayPal/Stripe receipts).
 INVOICE_PATTERNS = [
     r"\binvoice\s*#?\s*\d+\b", r"\bpurchase\s+order\s*#?\s*\d+\b",
-    r"\bremittance\s+advice\b", r"\breceipt\s+for\s+your\s+payment\b",
+    r"\bremittance\s+advice\b",
     r"\battached\s+invoice\b", r"\bpayment\s+due\b"
 ]
 
+# Bare "reset password" fires on every legitimate IdP email. Prefer scam-shaped
+# variants that claim compromise or forced expiry.
 PASSWORD_RESET_PATTERNS = [
-    r"\bpassword\s+expired\b", r"\breset\s+password\b",
-    r"\bunauthorized\s+login\s+attempt\b", r"\bsecurity\s+alert:\s+password\b",
-    r"\bpassword\s+change\s+request\b"
+    r"\bpassword\s+expired\b",
+    r"\bunauthorized\s+login\s+attempt\b",
+    r"\bsecurity\s+alert:\s+password\b",
+    r"\bpassword\s+change\s+request\b",
+    r"\breset\s+your\s+password\s+immediately\b",
 ]
 
 # Buckets are evaluated against the 0-100 display score.
@@ -340,11 +351,11 @@ def _score_routing_flags(routing: RoutingVerdict) -> List[PhishingSignal]:
         detail = "; ".join(evidence[:3])
         if len(evidence) > 3:
             detail += f" (+{len(evidence) - 3} more)"
-        signals.append(PhishingSignal(
-            indicator=f"Routing Forensics: {indicator}",
-            weight=weight,
-            explanation=explanation,
-            evidence=detail,
+        # Time-travel / forged Received is strong; soft routing quirks are weak.
+        strength = "strong" if weight >= 20 else "weak"
+        signals.append(_make_signal(
+            f"Routing Forensics: {indicator}", weight, explanation, detail,
+            strength=strength,
         ))
     return signals
 
@@ -411,11 +422,9 @@ def _score_domain_age(findings: Optional[List[DomainAgeFinding]]) -> List[Phishi
                    f"| Age: {finding.age_days} day(s)"
         if getattr(finding, "registrar", ""):
             evidence += f" | Registrar: {finding.registrar}"
-        candidates.append((weight, PhishingSignal(
-            indicator=f"Domain Reputation: {indicator}",
-            weight=weight,
-            explanation=explanation,
-            evidence=evidence,
+        candidates.append((weight, _make_signal(
+            f"Domain Reputation: {indicator}", weight, explanation, evidence,
+            strength="strong" if weight >= 15 else "weak",
         )))
 
     candidates.sort(key=lambda item: item[0], reverse=True)
@@ -495,11 +504,11 @@ def _score_html_findings(findings: Optional[List[HtmlFinding]]) -> List[Phishing
         evidence = f"[{severity}] {getattr(finding, 'evidence', '') or '-'}"
         if getattr(finding, "detail", ""):
             evidence += f" | {finding.detail}"
-        candidates.append((weight, PhishingSignal(
-            indicator=f"HTML Forensics: {finding.indicator}",
-            weight=weight,
-            explanation=getattr(finding, "explanation", ""),
-            evidence=evidence,
+        candidates.append((weight, _make_signal(
+            f"HTML Forensics: {finding.indicator}", weight,
+            getattr(finding, "explanation", ""),
+            evidence,
+            strength="strong" if weight >= 18 else "weak",
             severity=severity,
         )))
 
@@ -589,32 +598,35 @@ def _score_sender_history(
     financial_context = sorted(fired_indicators & SENDER_HISTORY_BEC_INDICATORS)
 
     if history.first_time_domain and financial_context:
-        return [PhishingSignal(
-            indicator="Sender History: First Contact Requesting Payment or Credentials",
-            weight=FIRST_CONTACT_WITH_PAYMENT_WEIGHT,
-            explanation="This recipient has never received mail from this domain, yet the message "
-                        "asks for payment or credentials. That combination is the standard shape of "
-                        "vendor impersonation and invoice fraud.",
-            evidence=f"{evidence} | Corroborating content: {', '.join(financial_context)}",
+        return [_make_signal(
+            "Sender History: First Contact Requesting Payment or Credentials",
+            FIRST_CONTACT_WITH_PAYMENT_WEIGHT,
+            "This recipient has never received mail from this domain, yet the message "
+            "asks for payment or credentials. That combination is the standard shape of "
+            "vendor impersonation and invoice fraud.",
+            f"{evidence} | Corroborating content: {', '.join(financial_context)}",
+            strength="strong",
         )]
 
     if history.first_time_domain:
-        return [PhishingSignal(
-            indicator="Sender History: First Contact from Unfamiliar Domain",
-            weight=FIRST_CONTACT_DOMAIN_WEIGHT,
-            explanation="No previously analysed message for this recipient came from this domain. "
-                        "Ordinary for a genuine new correspondent, so this is context rather than "
-                        "an accusation.",
-            evidence=evidence,
+        return [_make_signal(
+            "Sender History: First Contact from Unfamiliar Domain",
+            FIRST_CONTACT_DOMAIN_WEIGHT,
+            "No previously analysed message for this recipient came from this domain. "
+            "Ordinary for a genuine new correspondent, so this is context rather than "
+            "an accusation.",
+            evidence,
+            strength="weak",
         )]
 
     if history.first_time_address:
-        return [PhishingSignal(
-            indicator="Sender History: First Contact from New Address at a Known Domain",
-            weight=FIRST_CONTACT_ADDRESS_WEIGHT,
-            explanation="The domain is an established correspondent but this individual address is "
-                        "new, which is what both a new colleague and a look-alike mailbox look like.",
-            evidence=evidence,
+        return [_make_signal(
+            "Sender History: First Contact from New Address at a Known Domain",
+            FIRST_CONTACT_ADDRESS_WEIGHT,
+            "The domain is an established correspondent but this individual address is "
+            "new, which is what both a new colleague and a look-alike mailbox look like.",
+            evidence,
+            strength="weak",
         )]
 
     return []
@@ -657,6 +669,209 @@ FAMILY_SCORE_CAPS: dict[str, int] = {
     "domain reputation": MAX_DOMAIN_AGE_SCORE,
     "sender history": MAX_SENDER_HISTORY_SCORE,
 }
+
+# --- Signal strength & High-risk corroboration ---------------------------
+#
+# Root cause of prior false High verdicts: many weak, everyday indicators
+# (urgency wording, "security alert", invoice language, soft auth, missing
+# headers) summed past the High threshold without any strong phishing
+# evidence. High/Critical now requires strong corroboration.
+
+#: Soft content / structural indicators that are common in legitimate mail.
+#: When the sender is a known authenticated brand these contribute nothing.
+TRUSTED_SENDER_SUPPRESSED_INDICATORS = {
+    "Suspicious Keywords",
+    "Urgent Pressure Tactics",
+    "Financial Scam Language",
+    "Fake Invoice / BEC Indicators",
+    "Password Reset Scam Language",
+    "Credential Harvesting Language",
+    "URL Shortener Link",
+    "Multiple / Open Redirect Link Parameter",
+}
+
+#: Hard authentication failures are strong spoofing evidence.
+AUTH_STRONG_VERDICTS = {"fail"}
+
+#: Minimum strong-signal weight to allow High without a second family.
+MIN_STRONG_WEIGHT_FOR_HIGH = 40
+#: Minimum distinct strong families to allow High.
+MIN_STRONG_FAMILIES_FOR_HIGH = 2
+
+
+def _make_signal(
+    indicator: str,
+    weight: int,
+    explanation: str,
+    evidence: str,
+    *,
+    strength: str = "weak",
+    severity: str = "",
+) -> PhishingSignal:
+    return PhishingSignal(
+        indicator=indicator,
+        weight=weight,
+        explanation=explanation,
+        evidence=evidence,
+        strength=strength,
+        severity=severity,
+        original_weight=weight,
+        family=_signal_family(indicator),
+    )
+
+
+def is_trusted_authenticated_sender(from_domain: str, auth: AuthVerdict) -> bool:
+    """True when From is a known brand/ESP domain and auth did not fail.
+
+    Soft content signals from these senders (password reset, invoices, security
+    alerts) are expected legitimate language, not phishing evidence.
+    """
+    if not from_domain:
+        return False
+    spf = (auth.spf or "").lower()
+    dkim = (auth.dkim or "").lower()
+    dmarc = (auth.dmarc or "").lower()
+    if "fail" in (spf, dkim, dmarc):
+        return False
+    if spf != "pass" and dkim != "pass":
+        return False
+    reg = registrable_domain(from_domain.lower().strip("."))
+    if not reg:
+        return False
+    return reg in TRUSTED_TRANSACTIONAL_DOMAINS
+
+
+def _apply_trusted_sender_dampening(
+    signals: List[PhishingSignal],
+    trusted: bool,
+) -> List[PhishingSignal]:
+    """Zero out soft content signals from authenticated known-good senders."""
+    if not trusted:
+        return signals
+    for signal in signals:
+        if signal.indicator in TRUSTED_SENDER_SUPPRESSED_INDICATORS:
+            if signal.weight > 0:
+                signal.explanation = (
+                    f"{signal.explanation} [Suppressed: authenticated trusted sender — "
+                    "this language is expected from this provider.]"
+                )
+            signal.weight = 0
+    return signals
+
+
+def _annotate_contributions(signals: List[PhishingSignal], total: int) -> None:
+    for signal in signals:
+        if not signal.family:
+            signal.family = _signal_family(signal.indicator)
+        if total > 0 and signal.weight > 0:
+            signal.contribution_pct = round(100.0 * signal.weight / total, 1)
+        else:
+            signal.contribution_pct = 0.0
+
+
+def _apply_high_risk_gate(
+    display_score: int,
+    signals: List[PhishingSignal],
+) -> tuple[str, str, str]:
+    """Map display score to a risk bucket, requiring strong evidence for High+.
+
+    Returns ``(risk_level, classification_reason, rationale)``.
+    """
+    provisional = _bucket(display_score)
+    active = [s for s in signals if s.weight > 0]
+    strong = [s for s in active if s.strength == "strong"]
+    weak = [s for s in active if s.strength != "strong"]
+    strong_weight = sum(s.weight for s in strong)
+    strong_families = {_signal_family(s.indicator) for s in strong}
+    all_families = {_signal_family(s.indicator) for s in active}
+
+    strong_names = [s.indicator for s in sorted(strong, key=lambda x: -x.weight)[:5]]
+    weak_names = [s.indicator for s in sorted(weak, key=lambda x: -x.weight)[:5]]
+
+    evidence_summary = (
+        f"Display score {display_score}/100 from {len(active)} active signal(s) "
+        f"({len(strong)} strong across {len(strong_families)} family(ies), "
+        f"{len(weak)} weak). "
+        f"Strong: {', '.join(strong_names) or 'none'}. "
+        f"Weak: {', '.join(weak_names) or 'none'}."
+    )
+
+    if provisional in {"Low", "Medium"}:
+        reason = f"Score in {provisional} band ({display_score})."
+        return provisional, reason, evidence_summary + " " + reason
+
+    # High / Critical provisional — demand strong corroboration.
+    if len(strong_families) >= MIN_STRONG_FAMILIES_FOR_HIGH:
+        reason = (
+            f"{provisional}: {len(strong_families)} independent strong evidence "
+            f"families (required >={MIN_STRONG_FAMILIES_FOR_HIGH})."
+        )
+        return provisional, reason, evidence_summary + " " + reason
+
+    if strong_weight >= MIN_STRONG_WEIGHT_FOR_HIGH:
+        reason = (
+            f"{provisional}: strong evidence weight {strong_weight} "
+            f"(required >={MIN_STRONG_WEIGHT_FOR_HIGH})."
+        )
+        return provisional, reason, evidence_summary + " " + reason
+
+    other_families = all_families - strong_families
+    if strong_weight >= 25 and other_families:
+        reason = (
+            f"{provisional}: strong weight {strong_weight} corroborated by "
+            f"family(ies) {', '.join(sorted(other_families))}."
+        )
+        return provisional, reason, evidence_summary + " " + reason
+
+    reason = (
+        f"Demoted from {provisional} to Medium: score {display_score} lacked "
+        f"multiple strong indicators (strong weight={strong_weight}, "
+        f"strong families={len(strong_families)})."
+    )
+    return "Medium", reason, evidence_summary + " " + reason
+
+
+def _cross_domain_redirect(url: str) -> bool:
+    """True only when a redirect parameter points at a *different* registrable host.
+
+    Same-site tracking redirects (newsletter → article on the same domain) are
+    not open redirects and must not score.
+    """
+    from urllib.parse import urlparse, parse_qs, unquote
+
+    if not detect_redirect_param(url):
+        return False
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    host = (parsed.hostname or "").lower()
+    if not host:
+        return False
+    host_reg = registrable_domain(host)
+    redirect_keys = {
+        "redirect", "redirect_uri", "redirect_url", "return", "returnurl",
+        "return_url", "continue", "next", "url", "dest", "destination",
+        "goto", "target", "rurl", "u",
+    }
+    qs = parse_qs(parsed.query)
+    for key, values in qs.items():
+        if key.lower() not in redirect_keys:
+            continue
+        for value in values:
+            target = unquote(value or "")
+            if not target.startswith(("http://", "https://", "//")):
+                continue
+            candidate = target if "://" in target else "http:" + target
+            try:
+                target_host = (urlparse(candidate).hostname or "").lower()
+            except ValueError:
+                continue
+            if not target_host:
+                continue
+            if target_host != host and registrable_domain(target_host) != host_reg:
+                return True
+    return False
 
 
 def _apply_family_caps(signals: List[PhishingSignal]) -> List[PhishingSignal]:
@@ -716,46 +931,49 @@ def score_message(
     # HTML markup, entities and zero-width characters are stripped so keyword
     # and phrase matching sees the text a human actually reads.
     body = build_match_text(parsed.body_plain, parsed.body_html)
+    trusted = is_trusted_authenticated_sender(from_domain or "", auth)
 
     # --- URL Analysis Signals ---
     if url_verdict and url_verdict.urls:
         for u in url_verdict.urls:
             if u.is_mismatched_anchor:
-                signals.append(PhishingSignal(
-                    indicator="Deceptive / Mismatched Hyperlink",
-                    weight=30,
-                    explanation="Link anchor text displays a domain different from actual target destination.",
-                    evidence=f"Anchor: '{u.anchor_text}' | Target: '{u.domain}'"
+                signals.append(_make_signal(
+                    "Deceptive / Mismatched Hyperlink", 30,
+                    "Link anchor text displays a domain different from actual target destination.",
+                    f"Anchor: '{u.anchor_text}' | Target: '{u.domain}'",
+                    strength="strong",
                 ))
             if u.is_ip_based:
-                signals.append(PhishingSignal(
-                    indicator="IP-Based Link Target",
-                    weight=25,
-                    explanation="Link target uses a raw IP address instead of a domain name.",
-                    evidence=f"Target: '{u.raw_url}'"
+                signals.append(_make_signal(
+                    "IP-Based Link Target", 25,
+                    "Link target uses a raw IP address instead of a domain name.",
+                    f"Target: '{u.raw_url}'",
+                    strength="strong",
                 ))
             if u.is_shortener:
-                signals.append(PhishingSignal(
-                    indicator="URL Shortener Link",
-                    weight=15,
-                    explanation="Link uses a URL shortener service to conceal destination URL.",
-                    evidence=f"Shortener URL: '{u.raw_url}'"
+                signals.append(_make_signal(
+                    "URL Shortener Link", 10,
+                    "Link uses a URL shortener service to conceal destination URL.",
+                    f"Shortener URL: '{u.raw_url}'",
+                    strength="weak",
                 ))
             if u.is_suspicious_domain:
-                signals.append(PhishingSignal(
-                    indicator="Suspicious Link Domain",
-                    weight=20,
-                    explanation="Link targets a domain with high-risk TLD, Punycode, or lookalike patterns.",
-                    evidence=f"Domain: '{u.domain}'"
+                signals.append(_make_signal(
+                    "Suspicious Link Domain", 20,
+                    "Link targets a domain with high-risk TLD, Punycode, or lookalike patterns.",
+                    f"Domain: '{u.domain}'",
+                    strength="strong",
                 ))
-            if detect_redirect_param(u.raw_url) and not any(sig.indicator == "Multiple / Open Redirect Link Parameter" for sig in signals):
-                signals.append(PhishingSignal(
-                    indicator="Multiple / Open Redirect Link Parameter",
-                    weight=20,
-                    explanation="Link contains embedded redirect query parameters pointing to a secondary destination.",
-                    evidence=f"Link URL: '{u.raw_url}'"
+            if (_cross_domain_redirect(u.raw_url)
+                    and not any(sig.indicator == "Multiple / Open Redirect Link Parameter"
+                                for sig in signals)):
+                signals.append(_make_signal(
+                    "Multiple / Open Redirect Link Parameter", 15,
+                    "Link contains a redirect parameter pointing to a different host, "
+                    "which can hide the final destination.",
+                    f"Link URL: '{u.raw_url}'",
+                    strength="weak",
                 ))
-
 
     # --- Sender identity signals -----------------------------------------
     # Header Forensics already scores display-name impersonation, lookalike
@@ -772,11 +990,11 @@ def score_message(
         for brand_domain in KNOWN_BRAND_DOMAINS:
             brand = brand_domain.split(".")[0]
             if brand in display_lc and from_domain and brand not in from_domain:
-                signals.append(PhishingSignal(
-                    indicator="Display Name Impersonation",
-                    weight=25,
-                    explanation=f"Display name references known brand '{brand}', but actual sending domain is '{from_domain}'.",
-                    evidence=f"Display Name: '{display_name}' | From: '{from_address}'"
+                signals.append(_make_signal(
+                    "Display Name Impersonation", 25,
+                    f"Display name references known brand '{brand}', but actual sending domain is '{from_domain}'.",
+                    f"Display Name: '{display_name}' | From: '{from_address}'",
+                    strength="strong",
                 ))
                 break
 
@@ -784,33 +1002,33 @@ def score_message(
     if score_sender_identity_here and from_domain:
         brand = looks_like_lookalike(from_domain)
         if brand:
-            signals.append(PhishingSignal(
-                indicator="Lookalike / Typosquatted Domain",
-                weight=25,
-                explanation=f"Sender domain '{from_domain}' closely resembles target brand domain '{brand}'.",
-                evidence=f"Sender Domain: '{from_domain}' -> Resembles: '{brand}'"
+            signals.append(_make_signal(
+                "Lookalike / Typosquatted Domain", 25,
+                f"Sender domain '{from_domain}' closely resembles target brand domain '{brand}'.",
+                f"Sender Domain: '{from_domain}' -> Resembles: '{brand}'",
+                strength="strong",
             ))
 
-    # 4. Suspicious TLDs
+    # 4. Suspicious TLDs — strong when on the *sender* identity
     if score_sender_identity_here and from_domain:
         tld = from_domain.rsplit(".", 1)[-1].lower()
         if tld in HIGH_RISK_TLDS:
-            signals.append(PhishingSignal(
-                indicator="High-Risk Top-Level Domain (TLD)",
-                weight=20,
-                explanation=f"Sender domain uses high-risk top-level domain '.{tld}'.",
-                evidence=f"Domain: '{from_domain}'"
+            signals.append(_make_signal(
+                "High-Risk Top-Level Domain (TLD)", 20,
+                f"Sender domain uses high-risk top-level domain '.{tld}'.",
+                f"Domain: '{from_domain}'",
+                strength="strong",
             ))
 
     # 5. Unicode / Punycode Domains (not covered by header forensics)
     if from_domain:
         unicode_reason = is_punycode_or_unicode(from_domain)
         if unicode_reason:
-            signals.append(PhishingSignal(
-                indicator="Punycode / Unicode Domain",
-                weight=20,
-                explanation="Sender domain uses Punycode or non-ASCII characters, commonly exploited for IDN homograph spoofing.",
-                evidence=unicode_reason
+            signals.append(_make_signal(
+                "Punycode / Unicode Domain", 20,
+                "Sender domain uses Punycode or non-ASCII characters, commonly exploited for IDN homograph spoofing.",
+                unicode_reason,
+                strength="strong",
             ))
 
     # 6. Mismatched Sender Domains
@@ -828,85 +1046,83 @@ def score_message(
             mismatches.append(f"Return-Path ('{return_path_domain}')")
 
         if mismatches:
-            signals.append(PhishingSignal(
-                indicator="Mismatched Sender Domains",
-                weight=20,
-                explanation="Header From domain does not align with transmitter or bounce address domains.",
-                evidence=f"From Domain: '{from_domain}' | Mismatches: {', '.join(mismatches)}"
+            signals.append(_make_signal(
+                "Mismatched Sender Domains", 20,
+                "Header From domain does not align with transmitter or bounce address domains.",
+                f"From Domain: '{from_domain}' | Mismatches: {', '.join(mismatches)}",
+                strength="strong",
             ))
 
-
-
-    # 10. Suspicious Keywords in Subject / Body
-    # "confidential" was removed: it is boilerplate in corporate email footers
-    # and disclaimers, and was the single largest source of false positives.
-    suspicious_kw = ["security alert", "suspicious activity", "action required", "account notice"]
+    # 10. Suspicious Keywords — weak; common in corporate and IdP mail
+    # "confidential" was removed earlier (corporate disclaimer FP).
+    # "security alert" / "action required" alone must never drive High.
+    suspicious_kw = ["suspicious activity", "account notice"]
     found_kws = [kw for kw in suspicious_kw if kw in subject.lower() or kw in body.lower()]
     if found_kws:
-        signals.append(PhishingSignal(
-            indicator="Suspicious Keywords",
-            weight=15,
-            explanation="Subject or body contains high-risk threat keywords.",
-            evidence=f"Matched Keywords: {', '.join(found_kws)}"
+        signals.append(_make_signal(
+            "Suspicious Keywords", 8,
+            "Subject or body contains threat-oriented keywords that warrant review.",
+            f"Matched Keywords: {', '.join(found_kws)}",
+            strength="weak",
         ))
 
-    # 11. Credential Harvesting Language
+    # 11. Credential Harvesting Language — strong
     for pat in CREDENTIAL_PATTERNS:
         match = re.search(pat, body, re.I) or re.search(pat, subject, re.I)
         if match:
-            signals.append(PhishingSignal(
-                indicator="Credential Harvesting Language",
-                weight=30,
-                explanation="Email uses phrasing aimed at tricking recipients into revealing account credentials.",
-                evidence=f"Matched Phrase: '{match.group(0)}'"
+            signals.append(_make_signal(
+                "Credential Harvesting Language", 30,
+                "Email uses phrasing aimed at tricking recipients into revealing account credentials.",
+                f"Matched Phrase: '{match.group(0)}'",
+                strength="strong",
             ))
             break
 
-    # 12. Urgency Language
+    # 12. Urgency Language — weak corroborator
     for pat in URGENCY_PATTERNS:
         match = re.search(pat, body, re.I) or re.search(pat, subject, re.I)
         if match:
-            signals.append(PhishingSignal(
-                indicator="Urgent Pressure Tactics",
-                weight=25,
-                explanation="Email employs artificial time pressure to incite immediate action without due verification.",
-                evidence=f"Matched Phrase: '{match.group(0)}'"
+            signals.append(_make_signal(
+                "Urgent Pressure Tactics", 12,
+                "Email employs time pressure. Common in both phishing and legitimate business mail.",
+                f"Matched Phrase: '{match.group(0)}'",
+                strength="weak",
             ))
             break
 
-    # 13. Financial Scam Language
+    # 13. Financial Scam Language — strong for wire/crypto/gift-card asks
     for pat in FINANCIAL_PATTERNS:
         match = re.search(pat, body, re.I) or re.search(pat, subject, re.I)
         if match:
-            signals.append(PhishingSignal(
-                indicator="Financial Scam Language",
-                weight=25,
-                explanation="Email contains phrasing associated with wire fraud, cryptocurrency, or payment scams.",
-                evidence=f"Matched Phrase: '{match.group(0)}'"
+            signals.append(_make_signal(
+                "Financial Scam Language", 25,
+                "Email contains phrasing associated with wire fraud, cryptocurrency, or gift-card scams.",
+                f"Matched Phrase: '{match.group(0)}'",
+                strength="strong",
             ))
             break
 
-    # 14. Fake Invoice Indicators
+    # 14. Fake Invoice Indicators — strong but suppressed for trusted senders
     for pat in INVOICE_PATTERNS:
         match = re.search(pat, body, re.I) or re.search(pat, subject, re.I)
         if match:
-            signals.append(PhishingSignal(
-                indicator="Fake Invoice / BEC Indicators",
-                weight=30,
-                explanation="Email references fake invoices or purchase orders typical of Business Email Compromise (BEC).",
-                evidence=f"Matched Phrase: '{match.group(0)}'"
+            signals.append(_make_signal(
+                "Fake Invoice / BEC Indicators", 25,
+                "Email references invoices or purchase orders typical of Business Email Compromise (BEC).",
+                f"Matched Phrase: '{match.group(0)}'",
+                strength="strong",
             ))
             break
 
-    # 15. Password Reset Scams
+    # 15. Password Reset Scams — strong scam-shaped variants only
     for pat in PASSWORD_RESET_PATTERNS:
         match = re.search(pat, body, re.I) or re.search(pat, subject, re.I)
         if match:
-            signals.append(PhishingSignal(
-                indicator="Password Reset Scam Language",
-                weight=30,
-                explanation="Email pretends to be an automated password reset or security alert.",
-                evidence=f"Matched Phrase: '{match.group(0)}'"
+            signals.append(_make_signal(
+                "Password Reset Scam Language", 25,
+                "Email uses compromise/expiry password-reset phrasing typical of phishing lures.",
+                f"Matched Phrase: '{match.group(0)}'",
+                strength="strong",
             ))
             break
 
@@ -920,32 +1136,50 @@ def score_message(
         if not rule:
             continue
         weight, indicator, explanation = rule
-        signals.append(PhishingSignal(
-            indicator=indicator,
-            weight=weight,
-            explanation=explanation.format(domain=from_domain or "unknown"),
-            evidence=f"{mechanism.upper()} Verdict: {(verdict or '').upper()} | Details: {details or '-'}"
+        strength = "strong" if (verdict or "").lower() in AUTH_STRONG_VERDICTS else "weak"
+        signals.append(_make_signal(
+            indicator, weight,
+            explanation.format(domain=from_domain or "unknown"),
+            f"{mechanism.upper()} Verdict: {(verdict or '').upper()} | Details: {details or '-'}",
+            strength=strength,
         ))
 
     if auth.inconsistencies:
         for inc in auth.inconsistencies:
-            signals.append(PhishingSignal(
-                indicator="Authentication Inconsistency",
-                weight=20,
-                explanation="Detected conflicting authentication headers or domain misalignment.",
-                evidence=inc
+            signals.append(_make_signal(
+                "Authentication Inconsistency", 20,
+                "Detected conflicting authentication headers or domain misalignment.",
+                inc,
+                strength="strong",
             ))
 
     # --- Header Forensics Signals ---
     if header_verdict and header_verdict.findings:
         for hf in header_verdict.findings:
-            weight_map = {"Critical": 35, "High": 25, "Medium": 15, "Low": 5}
-            w = weight_map.get(hf.risk_level, 15)
-            signals.append(PhishingSignal(
-                indicator=f"Header Forensics: {hf.title}",
-                weight=w,
-                explanation=hf.description,
-                evidence=f"[{hf.risk_level}] {hf.evidence}"
+            title_lc = (hf.title or "").lower()
+            # Missing/structural completeness findings are weak and cheap — they
+            # describe incomplete messages, not spoofing.
+            if "missing" in title_lc:
+                w, strength = 8, "weak"
+            elif hf.risk_level == "Critical":
+                w, strength = 35, "strong"
+            elif hf.risk_level == "High":
+                w, strength = 25, "strong"
+            elif hf.risk_level == "Low":
+                w, strength = 5, "weak"
+            else:
+                # Medium: lookalike TLD etc. already High; remaining Medium is weak
+                if any(k in title_lc for k in ("lookalike", "typosquat", "impersonation", "spoofing")):
+                    w, strength = 25, "strong"
+                elif "high-risk top-level" in title_lc or "raw ip" in title_lc:
+                    w, strength = 20, "strong"
+                else:
+                    w, strength = 10, "weak"
+            signals.append(_make_signal(
+                f"Header Forensics: {hf.title}", w,
+                hf.description,
+                f"[{hf.risk_level}] {hf.evidence}",
+                strength=strength,
             ))
 
     # --- Routing Forensics Signals ---
@@ -958,10 +1192,6 @@ def score_message(
     signals.extend(_score_html_findings(html_findings))
 
     # --- Risky Attachments ---
-    # Consumes the flags computed by the Attachment Forensics Engine, falling
-    # back to a local re-check when scoring runs before/without that stage.
-    # Each attachment contributes at most one signal, weighted by its worst
-    # property, so a macro-enabled executable is not counted twice.
     for att in parsed.attachments:
         filename = att.filename
         ext = att.declared_extension or ""
@@ -976,9 +1206,6 @@ def score_message(
             reasons.append((30, f"script payload (extension '.{ext}')"))
         if att.true_type == "exe" and ext not in {"exe", "dll", "scr", "com"}:
             reasons.append((30, f"true file signature is executable but extension is '.{ext}'"))
-        # The name-based macro and encryption reasons are skipped when the
-        # content inspector proved the same thing: the verified observation
-        # below carries the weight, and saying it twice only pads the evidence.
         if getattr(att, "is_macro_enabled", False) and OFFICE_VBA_MACRO not in content_features:
             reasons.append((25, f"macro-enabled Office document (extension '.{ext}')"))
         if (getattr(att, "is_password_protected", False)
@@ -1000,37 +1227,51 @@ def score_message(
         if engine_findings:
             detail += f" | Engine: {'; '.join(engine_findings[:4])}"
 
-        signals.append(PhishingSignal(
-            indicator="Executable / Suspicious Attachment",
-            weight=weight,
-            explanation="Attachment forensics flagged a risky payload, masked extension, macro container, or unscannable archive.",
-            evidence=f"Filename: '{filename}' | Issues: {detail}"
+        # Executables / double-ext / macros are strong; lure names alone are weak.
+        strength = "strong" if weight >= 20 else "weak"
+        signals.append(_make_signal(
+            "Executable / Suspicious Attachment", weight,
+            "Attachment forensics flagged a risky payload, masked extension, macro container, or unscannable archive.",
+            f"Filename: '{filename}' | Issues: {detail}",
+            strength=strength,
         ))
 
     # --- Sender history (first contact, BEC baselining) ---
-    # Evaluated last because it reads which content signals already fired: a
-    # first contact only escalates when the message also asks for money or
-    # credentials. Absent in the CLI, which keeps no correspondence history.
     signals.extend(_score_sender_history(sender_history, {s.indicator for s in signals}))
+
+    # Suppress soft content signals from authenticated known-good brands so that
+    # Google/Microsoft/PayPal/Amazon transactional mail cannot accumulate into High.
+    _apply_trusted_sender_dampening(signals, trusted)
 
     # --- Per-family saturation (applied to every family at once) ---
     _apply_family_caps(signals)
 
     total = sum(s.weight for s in signals)
     display = to_display_score(total)
+    _annotate_contributions(signals, total)
+    risk_level, classification_reason, rationale = _apply_high_risk_gate(display, signals)
+
     confidence, confidence_label = assess_confidence(
         parsed, auth, routing, signals, domain_age_findings, html_findings, sender_history
     )
-    logger.info(f"Message scored {display}/100 ({_bucket(display)} risk, raw weight total {total}).")
+    strong_count = sum(1 for s in signals if s.strength == "strong" and s.weight > 0)
+    weak_count = sum(1 for s in signals if s.strength != "strong" and s.weight > 0)
+
+    logger.info(
+        f"Message scored {display}/100 ({risk_level} risk, raw weight total {total}"
+        f"{', trusted sender' if trusted else ''}). {classification_reason}"
+    )
 
     return ScoringVerdict(
         total_score=total,
-        risk_level=_bucket(display),
+        risk_level=risk_level,
         signals=signals,
         display_score=display,
         confidence=confidence,
         confidence_label=confidence_label,
+        rationale=rationale,
+        classification_reason=classification_reason,
+        strong_signal_count=strong_count,
+        weak_signal_count=weak_count,
+        trusted_sender=trusted,
     )
-
-
-

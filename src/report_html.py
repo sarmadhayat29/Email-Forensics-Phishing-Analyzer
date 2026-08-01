@@ -164,7 +164,10 @@ def write_html_report(finding: Finding, out_path: str) -> None:
       </p>
       <p style="margin: -1rem 0 1.5rem 0; color: var(--text-muted); font-size: 0.75rem; font-family: monospace;">
         Detection confidence: {_confidence_display(finding)} &nbsp;|&nbsp; Raw weighted evidence total: {finding.raw_score} across {len(finding.signals)} signal(s)
+        &nbsp;|&nbsp; Strong: {getattr(finding, 'strong_signal_count', 0)} &nbsp;|&nbsp; Weak: {getattr(finding, 'weak_signal_count', 0)}
+        {"&nbsp;|&nbsp; Trusted authenticated sender" if getattr(finding, "trusted_sender", False) else ""}
       </p>
+      {_render_classification_rationale(finding)}
       
       <!-- 4. Email Summary Grid -->
       <div class="grid-4">
@@ -371,6 +374,20 @@ def _render_routing(finding: Finding) -> str:
     </div>"""
 
 
+def _render_classification_rationale(finding: Finding) -> str:
+    rationale = getattr(finding, "rationale", "") or ""
+    reason = getattr(finding, "classification_reason", "") or ""
+    if not rationale and not reason:
+        return ""
+    return f"""<div class="info-card" style="margin: 0 0 1.25rem 0;">
+      <strong>Classification Reasoning</strong>
+      <p style="margin: 0.4rem 0 0; font-size: 0.85rem; color: var(--text-muted);">
+        {_escape(reason or rationale)}
+      </p>
+      {f'<p style="margin: 0.5rem 0 0; font-size: 0.75rem; font-family: monospace; color: var(--text-muted);">{_escape(rationale)}</p>' if rationale and reason and rationale != reason else ""}
+    </div>"""
+
+
 def _weight_badge(weight: int) -> str:
     """Points contributed by one signal.
 
@@ -391,8 +408,13 @@ def _render_signals(finding: Finding) -> str:
 
     signal_rows = "".join(
         f"""<tr>
-          <td><strong>{_escape(getattr(s, 'indicator', s.signal))}</strong></td>
-          <td>{_weight_badge(getattr(s, 'weight', 0))}</td>
+          <td><strong>{_escape(getattr(s, 'indicator', s.signal))}</strong>
+            <br><span class="badge" style="background:{'#7f1d1d' if getattr(s, 'strength', '') == 'strong' else '#1f2937'}; color:{'#fecaca' if getattr(s, 'strength', '') == 'strong' else '#9ca3af'};">{_escape((getattr(s, 'strength', 'weak') or 'weak').upper())}</span>
+            <span style="color: var(--text-muted); font-size: 0.7rem;"> {_escape(getattr(s, 'family', '') or '')}</span>
+          </td>
+          <td>{_weight_badge(getattr(s, 'weight', 0))}
+            <div style="color: var(--text-muted); font-size: 0.7rem; margin-top: 0.25rem;">{getattr(s, 'contribution_pct', 0)}% of score</div>
+          </td>
           <td>{_escape(getattr(s, 'explanation', s.detail))}</td>
           <td><code>{_escape(getattr(s, 'evidence', '-'))}</code></td>
         </tr>"""
@@ -400,7 +422,7 @@ def _render_signals(finding: Finding) -> str:
     )
 
     return f"""<table>
-      <tr><th>Indicator</th><th>Points</th><th>Explanation</th><th>Supporting Evidence</th></tr>
+      <tr><th>Indicator</th><th>Contribution</th><th>Explanation</th><th>Supporting Evidence</th></tr>
       {signal_rows}
     </table>"""
 

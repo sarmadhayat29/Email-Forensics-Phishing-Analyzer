@@ -215,6 +215,14 @@ class PhishingSignal:
     title: str = ""
     severity: str = "High"
     recommendation: str = "Investigate signal evidence and block malicious sender/domain if verified."
+    #: "strong" evidence can drive High/Critical; "weak" only corroborates.
+    strength: str = "weak"
+    #: Evidence family name used for caps and corroboration (filled by scoring).
+    family: str = ""
+    #: Weight before family caps / trusted-sender dampening.
+    original_weight: int = 0
+    #: Share of the final raw score this signal contributed (0-100).
+    contribution_pct: float = 0.0
 
     def __post_init__(self):
         if not self.title:
@@ -223,6 +231,8 @@ class PhishingSignal:
             self.signal = self.indicator
         if not self.detail:
             self.detail = f"{self.explanation} (Evidence: {self.evidence})"
+        if not self.original_weight:
+            self.original_weight = self.weight
         if not self.severity:
             if self.weight >= 30:
                 self.severity = "Critical"
@@ -248,6 +258,14 @@ class ScoringVerdict:
     #: there was too little evidence to make a claim.
     confidence: Optional[int] = None
     confidence_label: str = "Unknown"
+    #: Human-readable explanation of why this risk bucket was chosen.
+    rationale: str = ""
+    #: Short machine-oriented classification decision string.
+    classification_reason: str = ""
+    strong_signal_count: int = 0
+    weak_signal_count: int = 0
+    #: True when From domain is a known brand/provider and auth passed.
+    trusted_sender: bool = False
 
 
 @dataclass
@@ -323,6 +341,12 @@ class Finding:
     domain_age: list[DomainAgeFinding] = field(default_factory=list)
     #: Structural threats found in the HTML body, when one was present.
     html_findings: list[HtmlFinding] = field(default_factory=list)
+    #: Why the final risk bucket was chosen (strong vs weak evidence summary).
+    rationale: str = ""
+    classification_reason: str = ""
+    strong_signal_count: int = 0
+    weak_signal_count: int = 0
+    trusted_sender: bool = False
 
 
 

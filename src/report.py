@@ -64,6 +64,11 @@ def build_finding(
         confidence_label=scoring.confidence_label,
         domain_age=list(domain_age_findings or []),
         html_findings=list(html_findings or []),
+        rationale=getattr(scoring, "rationale", "") or "",
+        classification_reason=getattr(scoring, "classification_reason", "") or "",
+        strong_signal_count=getattr(scoring, "strong_signal_count", 0) or 0,
+        weak_signal_count=getattr(scoring, "weak_signal_count", 0) or 0,
+        trusted_sender=bool(getattr(scoring, "trusted_sender", False)),
     )
 
 
