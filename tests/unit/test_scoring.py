@@ -197,7 +197,7 @@ class TestSenderIdentityDeduplication(unittest.TestCase):
         self.assertIn("Display Name Impersonation", indicators)
         self.assertIn("Lookalike / Typosquatted Domain", indicators)
         self.assertIn("High-Risk Top-Level Domain (TLD)", indicators)
-        self.assertIn("Mismatched Sender Domains", indicators)
+        self.assertIn("Suspicious Reply / Sender Diversion", indicators)
 
     def test_not_double_scored_when_header_forensics_supplied(self):
         """Header forensics owns these categories once it is in play."""
@@ -210,7 +210,8 @@ class TestSenderIdentityDeduplication(unittest.TestCase):
             "Display Name Impersonation",
             "Lookalike / Typosquatted Domain",
             "High-Risk Top-Level Domain (TLD)",
-            "Mismatched Sender Domains",
+            "Suspicious Reply / Sender Diversion",
+            "Different Sender Header Domains",
         ):
             self.assertNotIn(duplicated, indicators)
 

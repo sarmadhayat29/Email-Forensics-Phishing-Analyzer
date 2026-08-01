@@ -11,6 +11,9 @@ from utils import (
     looks_like_lookalike,
     is_plausible_hostname,
     registrable_domain,
+    same_organization,
+    domain_relationship,
+    is_legitimate_esp,
     build_match_text,
     HIGH_RISK_TLDS,
     RISKY_EXTENSIONS,
@@ -56,6 +59,32 @@ class TestHostnamePlausibility(unittest.TestCase):
         self.assertEqual(registrable_domain("a.b.example.co.uk"), "example.co.uk")
         self.assertEqual(registrable_domain("portal.giki.edu.pk"), "giki.edu.pk")
         self.assertEqual(registrable_domain(""), "")
+
+
+class TestOrganizationAndEspMatching(unittest.TestCase):
+
+    def test_same_organization_subdomains(self):
+        self.assertTrue(same_organization("company.com", "mail.company.com"))
+        self.assertTrue(same_organization("company.com", "support.company.com"))
+        self.assertTrue(same_organization("giki.edu.pk", "portal.giki.edu.pk"))
+        self.assertTrue(same_organization("mx-out.giki.edu.pk", "giki.edu.pk"))
+        self.assertFalse(same_organization("company.com", "other.com"))
+        self.assertFalse(same_organization("paypal.com", "gmail.com"))
+
+    def test_esp_recognition(self):
+        self.assertTrue(is_legitimate_esp("em1234.sendgrid.net"))
+        self.assertTrue(is_legitimate_esp("mail.eu.amazonses.com"))
+        self.assertTrue(is_legitimate_esp("acme.zendesk.com"))
+        self.assertTrue(is_legitimate_esp("mailgun.org"))
+        self.assertFalse(is_legitimate_esp("gmail.com"))
+        self.assertFalse(is_legitimate_esp("evil.tk"))
+
+    def test_domain_relationship_classes(self):
+        self.assertEqual(domain_relationship("company.com", "support.company.com"), "same_org")
+        self.assertEqual(domain_relationship("brand.com", "em.sendgrid.net"), "trusted_esp")
+        self.assertEqual(domain_relationship("paypal.com", "gmail.com"), "suspicious")
+        self.assertEqual(domain_relationship("microsoft.com", "account-security.xyz"), "suspicious")
+        self.assertEqual(domain_relationship("company.com", "partner.org"), "unrelated")
 
 
 class TestLookalikeDetection(unittest.TestCase):

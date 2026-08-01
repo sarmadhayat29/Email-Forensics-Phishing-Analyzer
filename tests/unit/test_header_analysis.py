@@ -47,7 +47,7 @@ class TestHeaderAnalysis(unittest.TestCase):
         titles = [f.title for f in verdict.findings]
         self.assertIn("Display Name Brand Impersonation", titles)
 
-    def test_from_vs_reply_to_mismatch(self):
+    def test_from_vs_reply_to_unrelated_is_difference_not_high(self):
         parsed = ParsedMessage(
             from_raw="CEO <ceo@company.com>",
             reply_to_raw="attacker@phish.com",
@@ -63,8 +63,69 @@ class TestHeaderAnalysis(unittest.TestCase):
             }
         )
         verdict = analyze_headers(parsed)
-        titles = [f.title for f in verdict.findings]
-        self.assertIn("From vs. Reply-To Mismatch", titles)
+        by_title = {f.title: f for f in verdict.findings}
+        self.assertIn("From vs. Reply-To Domain Difference", by_title)
+        self.assertEqual(by_title["From vs. Reply-To Domain Difference"].risk_level, "Medium")
+
+    def test_same_org_reply_to_not_flagged(self):
+        parsed = ParsedMessage(
+            from_raw="noreply@company.com",
+            reply_to_raw="support@company.com",
+            message_id="<m@company.com>",
+            headers={"From": "noreply@company.com", "Reply-To": "support@company.com",
+                     "Message-ID": "<m@company.com>"},
+        )
+        titles = [f.title for f in analyze_headers(parsed).findings]
+        self.assertTrue(all("Reply-To" not in t for t in titles))
+
+    def test_subdomain_org_reply_to_not_flagged(self):
+        parsed = ParsedMessage(
+            from_raw="admissions@giki.edu.pk",
+            reply_to_raw="studentservices@portal.giki.edu.pk",
+            message_id="<m@giki.edu.pk>",
+            headers={"From": "admissions@giki.edu.pk",
+                     "Reply-To": "studentservices@portal.giki.edu.pk",
+                     "Message-ID": "<m@giki.edu.pk>"},
+        )
+        titles = [f.title for f in analyze_headers(parsed).findings]
+        self.assertTrue(all("Reply-To" not in t for t in titles))
+
+    def test_zendesk_esp_reply_to_not_flagged(self):
+        parsed = ParsedMessage(
+            from_raw="noreply@company.com",
+            reply_to_raw="support@company.zendesk.com",
+            message_id="<m@company.com>",
+            headers={"From": "noreply@company.com",
+                     "Reply-To": "support@company.zendesk.com",
+                     "Message-ID": "<m@company.com>"},
+        )
+        titles = [f.title for f in analyze_headers(parsed).findings]
+        self.assertTrue(all("Reply-To" not in t for t in titles))
+
+    def test_brand_to_gmail_reply_to_is_high(self):
+        parsed = ParsedMessage(
+            from_raw="security@paypal.com",
+            reply_to_raw="random@gmail.com",
+            message_id="<m@paypal.com>",
+            headers={"From": "security@paypal.com", "Reply-To": "random@gmail.com",
+                     "Message-ID": "<m@paypal.com>"},
+        )
+        by_title = {f.title: f for f in analyze_headers(parsed).findings}
+        self.assertIn("Suspicious Reply-To Destination", by_title)
+        self.assertEqual(by_title["Suspicious Reply-To Destination"].risk_level, "High")
+
+    def test_brand_to_high_risk_tld_reply_to_is_high(self):
+        parsed = ParsedMessage(
+            from_raw="account@microsoft.com",
+            reply_to_raw="help@account-security.xyz",
+            message_id="<m@microsoft.com>",
+            headers={"From": "account@microsoft.com",
+                     "Reply-To": "help@account-security.xyz",
+                     "Message-ID": "<m@microsoft.com>"},
+        )
+        by_title = {f.title: f for f in analyze_headers(parsed).findings}
+        self.assertIn("Suspicious Reply-To Destination", by_title)
+        self.assertEqual(by_title["Suspicious Reply-To Destination"].risk_level, "High")
 
     def test_missing_message_id_and_mandatory_headers(self):
         parsed = ParsedMessage(

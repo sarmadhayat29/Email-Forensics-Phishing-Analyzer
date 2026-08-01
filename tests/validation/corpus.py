@@ -192,6 +192,86 @@ def build_validation_corpus() -> list[ValidationCase]:
             ),
             _pass(),
         ),
+        (
+            "legit_university_reply_to",
+            "university",
+            _msg(
+                from_raw="Admissions <admissions@giki.edu.pk>",
+                reply_to_raw="Student Services <studentservices@portal.giki.edu.pk>",
+                subject="Application received",
+                body_plain="Your application was received. Reply with questions.",
+            ),
+            _pass(),
+        ),
+        (
+            "legit_same_org_support_reply",
+            "business",
+            _msg(
+                from_raw="Company <noreply@company.com>",
+                reply_to_raw="Support <support@company.com>",
+                subject="Ticket opened",
+                body_plain="We opened ticket #441. Reply to this email to add comments.",
+            ),
+            _pass(),
+        ),
+        (
+            "legit_zendesk_reply_to",
+            "helpdesk",
+            _msg(
+                from_raw="Support <noreply@acme.com>",
+                reply_to_raw="Acme Support <support@acme.zendesk.com>",
+                subject="[Ticket #12] Your request",
+                body_plain="Thanks for contacting Acme. Reply to continue the conversation.",
+            ),
+            _pass(),
+        ),
+        (
+            "legit_sendgrid_return_path",
+            "esp",
+            _msg(
+                from_raw="Marketing <marketing@brand.com>",
+                reply_to_raw="Campaigns <campaigns@mail.brand.com>",
+                return_path_raw="bounces@em1234.sendgrid.net",
+                sender_raw="Marketing via SendGrid <bounces@em1234.sendgrid.net>",
+                subject="August product update",
+                body_plain="New features this month. Visit https://brand.com/updates",
+            ),
+            _pass(),
+        ),
+        (
+            "legit_mailchimp_style",
+            "esp",
+            _msg(
+                from_raw="News <news@nonprofit.org>",
+                return_path_raw="bounce@mailchimp.com",
+                subject="Monthly newsletter",
+                body_html='<p>Hello friends. <img src="https://cdn.mailchimp.com/pixel.gif" width="1" height="1"></p>',
+            ),
+            _pass(),
+        ),
+        (
+            "legit_brevo_ses_style",
+            "esp",
+            _msg(
+                from_raw="Alerts <alerts@fintech.example>",
+                return_path_raw="bounce@mail.eu.amazonses.com",
+                sender_raw="via Amazon SES <bounce@mail.eu.amazonses.com>",
+                subject="Monthly statement ready",
+                body_plain="Your statement is ready in the portal.",
+            ),
+            _pass(),
+        ),
+        (
+            "legit_bank_subdomain_reply",
+            "bank",
+            _msg(
+                from_raw="HSBC <noreply@hsbc.com>",
+                reply_to_raw="Customer Care <care@secure.hsbc.com>",
+                subject="Statement available",
+                body_plain="Your e-statement is ready. Sign in at https://www.hsbc.com",
+            ),
+            _pass(),
+        ),
     ]
 
     for case_id, category, parsed, auth in benign_specs:
@@ -272,6 +352,34 @@ def build_validation_corpus() -> list[ValidationCase]:
                 body_plain="Please verify your account to review the document: http://d0cusign-secure.xyz/login",
             ),
             _fail(),
+        ),
+        (
+            "phish_paypal_gmail_replyto",
+            "phishing",
+            _msg(
+                from_raw="PayPal <service@paypal.com>",
+                reply_to_raw="helpdesk@gmail.com",
+                subject="Confirm your password now",
+                body_plain=(
+                    "Your account will be limited. Confirm your password at "
+                    "http://paypal-secure-login.tk/verify within 24 hours."
+                ),
+            ),
+            _pass(),  # auth may pass if headers look real; Reply-To + lure still malicious
+        ),
+        (
+            "phish_microsoft_xyz_replyto",
+            "phishing",
+            _msg(
+                from_raw="Microsoft <account@microsoft.com>",
+                reply_to_raw="recover@account-security.xyz",
+                subject="Verify your account immediately",
+                body_html=(
+                    "<p>Unauthorized login. Enter credentials here: "
+                    '<a href="http://account-security.xyz/login">Sign in</a></p>'
+                ),
+            ),
+            _pass(),
         ),
     ]
 
